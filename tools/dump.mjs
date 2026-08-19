@@ -37,7 +37,7 @@ ops.forEach(v => {
     shaders.push({
       label: `${v.fn} x ${PRIMS[pi].name}`,
       src: assemble({ stack: [{ type: v.type, p: v.params }], prim: pi,
-                      iters: 4, steps: 96, ao: true, shadow: false, glow: false })
+                      iters: 4, steps: 96, ao: true, shadow: false, glow: false, bounces: 1 })
     });
   });
 });
@@ -45,13 +45,19 @@ ops.forEach(v => {
   shaders.push({
     label: `feature flags ${k}`,
     src: assemble({ stack: ops.slice(0, 4).map(v => ({ type: v.type, p: v.params })),
-                    prim: 0, iters: 6, steps: 128, ao: f[0], shadow: f[1], glow: f[2] })
+                    prim: 0, iters: 6, steps: 128, ao: f[0], shadow: f[1], glow: f[2],
+                    bounces: k })
   });
 });
+[0, 1, 2, 3, 4].forEach(b => shaders.push({
+  label: `bounces=${b}`,
+  src: assemble({ stack: [{ type: 13, p: [2, 2, 2] }], prim: 0, iters: 2, steps: 96,
+                  ao: true, shadow: false, glow: false, bounces: b })
+}));
 shaders.push({
   label: 'max stack (8 ops)',
   src: assemble({ stack: ops.slice(0, 8).map(v => ({ type: v.type, p: v.params })),
-                  prim: 0, iters: 8, steps: 128, ao: true, shadow: true, glow: true })
+                  prim: 0, iters: 8, steps: 128, ao: true, shadow: true, glow: true, bounces: 2 })
 });
 
 // de gate: a few real stacks, assembled but with main() stripped by the Python side
@@ -60,13 +66,17 @@ const deStacks = [
   { label: 'mandelbox',      stack: [{ type: 5, p: [1.0] }, { type: 6, p: [0.5, 1.0] }], iters: 6 },
   { label: 'tetra',          stack: [{ type: 9, p: [0.6] }], iters: 9 },
   { label: 'twist + sector', stack: [{ type: 10, p: [0.6, 1] }, { type: 4, p: [6, 0, 1] }], iters: 3 },
-  { label: 'inversion',      stack: [{ type: 7, p: [1.0] }, { type: 5, p: [1.0] }], iters: 5 }
+  { label: 'inversion',      stack: [{ type: 7, p: [1.0] }, { type: 5, p: [1.0] }], iters: 5 },
+  { label: 'mirror room',    stack: [{ type: 13, p: [2, 2, 2] }, { type: 14, p: [0.9, 0.9, 0.9] }], iters: 2 },
+  { label: 'mirror corridor',stack: [{ type: 12, p: [1, 1.6, 0] }], iters: 2 },
+  { label: 'kaleido tile',   stack: [{ type: 16, p: [0, 1.4, 1] }, { type: 12, p: [1, 2.2, 0] }], iters: 3 },
+  { label: 'mirror shells',  stack: [{ type: 15, p: [0.85, 0.2] }, { type: 14, p: [0.6, 0.6, 0.6] }], iters: 3 }
 ];
 deStacks.forEach(d => {
-  d.src = assemble({ stack: d.stack, prim: 0, iters: d.iters, steps: 160,
-                     ao: false, shadow: false, glow: false });
-  d.sig = signature({ stack: d.stack, prim: 0, iters: d.iters, steps: 160,
-                      ao: false, shadow: false, glow: false });
+  const c = { stack: d.stack, prim: 0, iters: d.iters, steps: 160,
+              ao: false, shadow: false, glow: false, bounces: 0 };
+  d.src = assemble(c);
+  d.sig = signature(c);
 });
 
 process.stdout.write(JSON.stringify({
