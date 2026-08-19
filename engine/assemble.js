@@ -68,7 +68,8 @@ export function normalizeCfg(cfg){
     steps:  cfg.steps | 0 || 128,
     ao:     !!cfg.ao,
     shadow: !!cfg.shadow,
-    glow:   !!cfg.glow
+    glow:   !!cfg.glow,
+    bounces: Math.max(0, Math.min(4, cfg.bounces | 0))
   };
 }
 
@@ -80,7 +81,8 @@ export function signature(cfg){
     const d = discIdx(op).map(i => Math.round(sl.p[i]));
     return sl.type + (d.length ? ':' + d.join('.') : '');
   }).join(',');
-  return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0, ops].join('|');
+  return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
+          c.bounces, ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -198,6 +200,24 @@ vec3 background(vec3 rd){
   return mix(uBgBot, uBgTop, up * up);
 }
 
+vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap){
+  float ct = clamp(sqrt(max(trap.w, 0.0)) * uTrapScale + uTrapShift, 0.0, 1.0);
+  vec3 base = palette(ct);
+
+  float aoV = ${cfg.ao ? 'calcAO(p, n)' : '1.0'};
+  vec3  L   = normalize(uLightDir);
+  float sha = ${cfg.shadow ? 'softShadow(p, L)' : '1.0'};
+  float dif = max(dot(n, L), 0.0);
+  vec3  hv  = normalize(L - rd);
+  float spe = pow(max(dot(n, hv), 0.0), 34.0) * uSpec;
+  float fre = pow(1.0 - max(dot(n, -rd), 0.0), 4.0) * uRim;
+
+  vec3 col  = base * (uAmbient * aoV + dif * sha * aoV);
+  col += vec3(spe) * sha * aoV;
+  col += base * fre;
+  return col;
+}
+
 void main(){
   vec2 uv = (gl_FragCoord.xy - uRes * 0.5) / uRes.y;
 
@@ -208,38 +228,44 @@ void main(){
   vec3 upv = cross(rgt, fwd);
   vec3 rd = normalize(rgt * uv.x + upv * uv.y + fwd * uFov);
 
-  float glowAcc;
-  float t = march(ro, rd, glowAcc);
-  vec3 col;
+  // Specular bounce loop. Folding space makes mirror GEOMETRY; this makes the surfaces
+  // actually mirror EACH OTHER, which is the other half of a hall of mirrors. Bounce count is
+  // a compile-time literal, so 0 bounces emits a single march and costs nothing.
+  vec3 accum = vec3(0.0);
+  vec3 atten = vec3(1.0);
+  float glowTot = 0.0;
 
-  if(t > 0.0){
+  for(int b = 0; b < ${cfg.bounces + 1}; b++){
+    float ga = 0.0;
+    float t = march(ro, rd, ga);
+    glowTot += ga * (b == 0 ? 1.0 : 0.55);
+
+    if(t < 0.0){ accum += atten * background(rd); break; }
+
     vec3 p = ro + rd * t;
     vec3 n = calcNormal(p, t);
     vec4 trap;
     mapT(p, trap);
 
-    float ct = clamp(sqrt(max(trap.w, 0.0)) * uTrapScale + uTrapShift, 0.0, 1.0);
-    vec3 base = palette(ct);
-
-    float aoV = ${cfg.ao ? 'calcAO(p, n)' : '1.0'};
-    vec3  L   = normalize(uLightDir);
-    float sha = ${cfg.shadow ? 'softShadow(p, L)' : '1.0'};
-    float dif = max(dot(n, L), 0.0);
-    vec3  hv  = normalize(L - rd);
-    float spe = pow(max(dot(n, hv), 0.0), 34.0) * uSpec;
-    float fre = pow(1.0 - max(dot(n, -rd), 0.0), 4.0) * uRim;
-
-    col  = base * (uAmbient * aoV + dif * sha * aoV);
-    col += vec3(spe) * sha * aoV;
-    col += base * fre;
-
-    float f = 1.0 - exp(-uFog * t * t * 0.01);
-    col = mix(col, background(rd), clamp(f, 0.0, 1.0));
-  } else {
-    col = background(rd);
+    vec3 c = shadeSurface(p, n, rd, trap);
+    float fg = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
+    c = mix(c, background(rd), fg);
+${cfg.bounces > 0 ? `
+    // Schlick-weighted: grazing angles reflect hardest, which is what makes a folded plane
+    // read as glass rather than as painted metal.
+    float F = uReflect * mix(0.18, 1.0, pow(1.0 - max(dot(n, -rd), 0.0), 5.0)) * (1.0 - fg);
+    if(b == ${cfg.bounces}){ accum += atten * c; break; }
+    accum += atten * c * (1.0 - F);
+    atten *= F;
+    if(max(atten.r, max(atten.g, atten.b)) < 0.006) break;
+    ro = p + n * max(uEps * t, 1e-5) * 6.0;
+    rd = reflect(rd, n);` : `
+    accum += atten * c;
+    break;`}
   }
 
-  ${cfg.glow ? 'col += palette(clamp(glowAcc * 0.03 + uTrapShift, 0.0, 1.0)) * glowAcc * uGlow * 0.02;' : ''}
+  vec3 col = accum;
+  ${cfg.glow ? 'col += palette(clamp(glowTot * 0.03 + uTrapShift, 0.0, 1.0)) * glowTot * uGlow * 0.02;' : ''}
 
   col *= uExposure;
   float lum = dot(col, vec3(0.299, 0.587, 0.114));

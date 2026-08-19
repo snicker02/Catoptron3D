@@ -155,8 +155,106 @@ export const OPS = [
     glsl: `vec3 opRepeat(vec3 p, vec4 P, inout float s, inout vec4 trap){
   vec3 c = max(vec3(P.x, P.y, P.z), vec3(1e-3));
   return p - c * round(p / c);       // isometry INSIDE a cell; discontinuous across cells.
-}` }
+}` },
+
+  // ── MIRROR GROUP ────────────────────────────────────────────────────────────────────────
+  // These differ from the fractal folds above in one structural way: they contain no scale at
+  // all. A fractal fold contracts, so structure NESTS; a mirror fold is a pure isometry, so
+  // space TILES at constant size. That is what reads as a hall of mirrors rather than a
+  // fractal, and it is why these ops want IFS contraction at 1.0 (see the Mirror room starter).
+  //
+  // They are also the safest ops here. Reflection folding is CONTINUOUS and globally
+  // 1-Lipschitz — unlike Domain repeat, which teleports — so it can never over-report distance.
+  // Iterating them folds any point into the fundamental domain, which is what generates the
+  // tiling; more iterations just means the fold reaches further out.
+
+  { name: 'Mirror corridor', fn: 'opCorridor', lip: 'exact', deps: [],
+    params: [['Axis', 0, 2, 1, 0, AXIS], ['Spacing', 0.15, 8, 0.01, 2], ['Offset', -4, 4, 0.01, 0]],
+    disc: [0],
+    glsl: d => {
+      const c = 'xyz'[d[0]];
+      const out = [`vec3(m, p.y, p.z)`, `vec3(p.x, m, p.z)`, `vec3(p.x, p.y, m)`][d[0]];
+      return `vec3 opCorridor_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap){
+  // Two facing mirrors: the classic infinite corridor. A triangle wave IS the reflection
+  // sequence of a parallel mirror pair, so this is exact and needs no iteration.
+  float D = max(P.y, 1e-3);
+  float t = mod(p.${c} - P.z, 2.0 * D);
+  float m = D - abs(D - t) + P.z;   // continuous, 1-Lipschitz: s unchanged
+  return ${out};
+}`;
+    } },
+
+  { name: 'Mirror room', fn: 'opMirrorRoom', lip: 'exact', deps: [],
+    params: [['Size X', 0.15, 8, 0.01, 2], ['Size Y', 0.15, 8, 0.01, 2], ['Size Z', 0.15, 8, 0.01, 2]],
+    glsl: `vec3 opMirrorRoom(vec3 p, vec4 P, inout float s, inout vec4 trap){
+  // Three orthogonal mirror pairs — the infinity room. Everything folds into one box.
+  vec3 D = max(vec3(P.x, P.y, P.z), vec3(1e-3));
+  vec3 t = mod(p, 2.0 * D);
+  return D - abs(D - t);            // isometry, s unchanged
+}` },
+
+  { name: 'Corner mirror', fn: 'opCorner', lip: 'exact', deps: [],
+    params: [['Offset X', -3, 3, 0.005, 0], ['Offset Y', -3, 3, 0.005, 0], ['Offset Z', -3, 3, 0.005, 0]],
+    glsl: `vec3 opCorner(vec3 p, vec4 P, inout float s, inout vec4 trap){
+  // Three mutually perpendicular mirrors meeting at a point — a retroreflector.
+  // Unlike Octahedral fold this does NOT sort the axes, so it keeps 8-fold cubic symmetry
+  // instead of collapsing to a single 48th of space.
+  return abs(p) - vec3(P.x, P.y, P.z);
+}` },
+
+  { name: 'Mirror shells', fn: 'opShells', lip: 'exact', deps: [],
+    params: [['Spacing', 0.1, 4, 0.005, 1], ['Offset', 0, 4, 0.01, 0]],
+    glsl: `vec3 opShells(vec3 p, vec4 P, inout float s, inout vec4 trap){
+  // Concentric spherical mirrors: radius folds, direction is preserved.
+  // NOT an isometry — the radial eigenvalue is 1 but the two angular ones are f(r)/r, so the
+  // operator norm is max(1, f(r)/r). Declared exactly rather than bounded.
+  float D = max(P.x, 1e-3);
+  float r = length(p);
+  if(r < 1e-6) return p;
+  float t  = mod(r - P.y, 2.0 * D);
+  float rr = D - abs(D - t) + P.y;
+  float k  = rr / r;
+  s *= max(1.0, k);
+  trap = min(trap, vec4(abs(p), r * r));
+  return p * k;
+}` },
+
+  { name: 'Kaleidoscope tile', fn: 'opTriGroup', lip: 'exact', deps: [],
+    params: [['Group', 0, 2, 1, 0, ['*632 hex', '*442 square', '*333 triangle']],
+             ['Cell', 0.2, 6, 0.01, 1.5],
+             ['Axis', 0, 2, 1, 1, AXIS]],
+    disc: [0, 2],
+    glsl: d => {
+      // Euclidean triangle reflection groups. A triangle whose angles are pi/p, pi/q, pi/r with
+      // 1/p+1/q+1/r == 1 generates a wallpaper group by reflection alone — there are exactly
+      // three: (2,3,6), (2,4,4), (3,3,3). Each mirror is (normal, offset) in the folding plane.
+      const TRI = [
+        // *632 : 30-60-90 triangle
+        [['vec2(0.0,-1.0)', '0.0'], ['vec2(1.0,0.0)', 'a'], ['vec2(-0.5,0.8660254)', '0.0']],
+        // *442 : 45-90-45 triangle
+        [['vec2(0.0,-1.0)', '0.0'], ['vec2(1.0,0.0)', 'a'], ['vec2(-0.7071068,0.7071068)', '0.0']],
+        // *333 : equilateral
+        [['vec2(0.0,-1.0)', '0.0'], ['vec2(0.8660254,0.5)', '0.8660254*a'], ['vec2(-0.8660254,0.5)', '0.0']]
+      ][d[0]];
+      const ax = d[1];
+      const grab = ['vec2(p.y, p.z)', 'vec2(p.z, p.x)', 'vec2(p.x, p.y)'][ax];
+      const put  = ['vec3(p.x, q.x, q.y)', 'vec3(q.y, p.y, q.x)', 'vec3(q.x, q.y, p.z)'][ax];
+      const refl = TRI.map(([n, off], i) =>
+        `    { vec2 n${i} = ${n}; float e${i} = dot(q, n${i}) - (${off});
+      if(e${i} > 0.0){ q -= 2.0 * e${i} * n${i}; moved = true; } }`).join('\n');
+      return `vec3 opTriGroup_${d[0]}_${ax}(vec3 p, vec4 P, inout float s, inout vec4 trap){
+  float a = max(P.y, 1e-3);
+  vec2 q = ${grab};
+  for(int i = 0; i < 8; i++){
+    bool moved = false;
+${refl}
+    if(!moved) break;             // inside the fundamental triangle
+  }
+  return ${put};                  // reflections only: isometry, s unchanged
+}`;
+    } }
 ];
+
 
 // Discrete param indices for an op (those with a names list), in param order.
 export function discIdx(op){
