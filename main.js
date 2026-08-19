@@ -35,7 +35,7 @@ const state = {
   steps: 128, stepScale: 0.9, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
-  spec: 0.55, rim: 0.9, fog: 0.35,
+  spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, bounces: 0,
   // colour
   palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
   // quality
@@ -72,6 +72,7 @@ const GROUPS = [
     ['ao',        'AO',        0, 3,   0.01,  2],
     ['shadow',    'Shadows',   0, 1,   0.01,  2],
     ['spec',      'Specular',  0, 2,   0.01,  2],
+    ['reflect',   'Reflectivity', 0, 1, 0.01, 2],
     ['rim',       'Rim',       0, 3,   0.01,  2],
     ['fog',       'Fog',       0, 3,   0.01,  2]
   ]],
@@ -123,7 +124,8 @@ function currentCfg(){
     steps:  Math.round(state.steps),
     ao:     state.ao > 0.001,
     shadow: state.shadow > 0.001,
-    glow:   state.glow > 0.001
+    glow:   state.glow > 0.001,
+    bounces: Math.round(state.bounces)
   };
 }
 
@@ -198,6 +200,7 @@ function renderScene(w, h){
   u1(L, 'uAmbient', state.ambient);
   u1(L, 'uAoStr', state.ao);
   u1(L, 'uSpec', state.spec);
+  u1(L, 'uReflect', state.reflect);
   u1(L, 'uRim', state.rim);
   u1(L, 'uFog', state.fog);
 
@@ -226,6 +229,58 @@ function renderScene(w, h){
   });
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+
+/* ── starters ──────────────────────────────────────────────────────────────────────────────
+   Mirror folds are isometries, so they want IFS contraction at 1.0 — iterating then reaches
+   further out through the tiling instead of shrinking. The fractal default of 1.9 collapses
+   them, which makes mirror mode nearly undiscoverable without these.                        */
+const STARTERS = {
+  'Mirror room': {
+    stack: [{ t: 13, p: [2, 2, 2] }, { t: 14, p: [0.9, 0.9, 0.9] }],
+    set: { iters: 2, ifsScale: 1.0, prim: 0, primSize: 0.62, primRound: 0.05, steps: 192,
+           bounces: 2, reflect: 0.62, ao: 0.8, fog: 0.18, camDist: 3.4, fov: 1.5,
+           camAzim: 0.9, camElev: 0.35, palette: 2, trapScale: 0.5, exposure: 1.35 }
+  },
+  'Kaleidoscope tube': {
+    stack: [{ t: 4, p: [6, 0, 2] }, { t: 12, p: [2, 1.5, 0] }, { t: 0, p: [0.95, 0, 0] }],
+    set: { iters: 2, ifsScale: 1.0, prim: 4, primSize: 0.42, primRound: 0.10, primAux: 0.13,
+           steps: 192, bounces: 2, reflect: 0.55, ao: 0.9, fog: 0.16, camDist: 2.6, fov: 1.7,
+           camAzim: 1.5708, camElev: 0.02, palette: 1, trapScale: 0.8, exposure: 1.35 }
+  },
+  'Hex mirror hall': {
+    stack: [{ t: 16, p: [0, 1.1, 1] }, { t: 12, p: [1, 1.8, 0] }],
+    set: { iters: 3, ifsScale: 1.0, prim: 0, primSize: 0.45, primRound: 0.05, steps: 256,
+           bounces: 2, reflect: 0.72, ao: 0.7, fog: 0.16, camDist: 2.4, fov: 1.6,
+           camAzim: 0.9, camElev: 0.02, palette: 0, trapScale: 0.55, exposure: 1.45 }
+  },
+  'Mirror shells': {
+    stack: [{ t: 15, p: [2.0, 0.0] }, { t: 13, p: [2.6, 2.6, 2.6] }],
+    set: { iters: 2, ifsScale: 1.0, prim: 0, primSize: 0.9, primRound: 0.05, steps: 256,
+           bounces: 2, reflect: 0.6, ao: 0.9, fog: 0.18, camDist: 6.0, fov: 1.2,
+           camAzim: 0.9, camElev: 0.24, palette: 3, trapScale: 0.55, exposure: 1.35 }
+  },
+  'Mandelbox (fractal)': {
+    stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }, { t: 2, p: [2.0] }],
+    set: { iters: 10, ifsScale: 1.0, prim: 2, primSize: 0.9, steps: 192, bounces: 0,
+           reflect: 0.0, ao: 1.0, fog: 0.3, camDist: 6.5, fov: 1.2, camAzim: 0.9,
+           camElev: 0.3, palette: 4, trapScale: 0.35, exposure: 1.25 }
+  }
+};
+
+function applyStarter(name){
+  const st = STARTERS[name];
+  if(!st) return;
+  state.stack = st.stack.map(e => {
+    const sl = newSlot(e.t);
+    e.p.forEach((v, i) => { sl.p[i] = v; });
+    return sl;
+  });
+  Object.assign(state, st.set);
+  renderStack();
+  rebuildGlobals();
+  setStat('loaded \u201c' + name + '\u201d');
 }
 
 /* ── stack ─────────────────────────────────────────────────────────────────────────────── */
@@ -353,7 +408,12 @@ function mkSelect(label, names, val, onChange, isDiscrete){
 }
 
 /* ── panel build ───────────────────────────────────────────────────────────────────────── */
-function buildPanel(){
+function rebuildGlobals(){
+  $('globals').innerHTML = '';
+  buildGlobals();
+}
+
+function buildGlobals(){
   const host = $('globals');
 
   // primitive + march steps + palette (discrete: they rebuild)
@@ -363,6 +423,8 @@ function buildPanel(){
   g0.append(mkSelect('March steps', MARCH_STEPS.map(s => String(s)),
                      MARCH_STEPS.indexOf(state.steps),
                      v => { state.steps = MARCH_STEPS[v]; }, true));
+  g0.append(mkSelect('Mirror bounces', ['0 \u2014 off', '1', '2', '3', '4'],
+                     state.bounces, v => { state.bounces = v; }, true));
   g0.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                      v => { state.palette = v; }, false));
   host.append(g0);
@@ -375,6 +437,17 @@ function buildPanel(){
     host.append(g);
   });
 
+}
+
+function buildPanel(){
+  buildGlobals();
+  const starters = $('starters');
+  Object.keys(STARTERS).forEach(k => {
+    const b = document.createElement('button');
+    b.textContent = k;
+    b.onclick = () => applyStarter(k);
+    starters.append(b);
+  });
   const addSel = $('addOp');
   OPS.forEach((op, i) => {
     const o = document.createElement('option');

@@ -96,6 +96,8 @@ button:hover{border-color:var(--valEdge);color:var(--h1a)}
 button:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .row{display:flex;gap:6px;align-items:center;margin-bottom:8px}
 .row select{flex:1}
+.starters{display:flex;flex-wrap:wrap;gap:5px}
+.starters button{flex:1 1 calc(50% - 3px);text-align:left;font-size:10px;padding:6px 8px}
 
 /* fold cards */
 .card{
@@ -158,6 +160,11 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <div class="hint">Drag to orbit &middot; scroll to zoom &middot; WASD orbit &middot; Q/E dolly &middot; Shift for fine</div>
   </header>
   <hr>
+
+  <div class="group">
+    <h2>Starters</h2>
+    <div id="starters" class="starters"></div>
+  </div>
 
   <div class="group">
     <h2>Fold stack</h2>

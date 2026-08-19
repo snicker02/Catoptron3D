@@ -148,11 +148,50 @@ If a stack ever crawls or shows holes, lower **Step scale** before suspecting an
 
 ---
 
-## Current state — M0
+## Mirror geometry vs fractal geometry
 
-Shipping: the DE contract and assembler, 12 operators (11 exact, 1 cell-local), 5 primitives,
-IFS recursion, orbit camera, AO / soft shadows / rim / fog, orbit-trap palette colouring,
-progressive resolution, PNG export, and the validation harness.
+The two op families work by opposite mechanisms, and it's worth knowing which one you're using:
+
+| | fractal folds | mirror folds |
+|---|---|---|
+| scale | contract each pass | none — pure isometry |
+| result | structure **nests** | space **tiles** at constant size |
+| IFS contraction | < 1.0 (that's the point) | **1.0** — otherwise it collapses |
+| iterations mean | recursion depth | how far the fold reaches |
+
+Mirror folds are the safest ops in the library: reflection folding is continuous and globally
+1-Lipschitz, so it can never over-report distance. (Domain repeat is the exception — it
+teleports rather than reflects, which is why it's marked `repeat` and not `exact`.)
+
+Because they need IFS contraction at 1.0 and the fractal default is 1.9, mirror mode is
+undiscoverable without help — hence the **Starters** buttons at the top of the panel.
+
+Two halves make a hall of mirrors, and you want both:
+
+- **Mirror folds** build the mirror *geometry* — Mirror corridor, Mirror room, Corner mirror,
+  Mirror shells, Kaleidoscope tile.
+- **Mirror bounces** (Renderer panel) make the surfaces actually reflect *each other*. Bounce
+  count is a compile-time literal, so 0 costs nothing; 2 is usually the sweet spot. Reflectivity
+  is Schlick-weighted, so grazing angles reflect hardest — that's what makes a folded plane read
+  as glass rather than painted metal.
+
+`Kaleidoscope tile` deserves a note: a triangle whose angles are π/p, π/q, π/r with
+1/p + 1/q + 1/r = 1 generates a wallpaper group by reflection alone, and there are exactly three
+such triangles — (2,3,6), (2,4,4), (3,3,3). Those are the three modes. It folds in a plane and
+extrudes along the axis you pick, so pairing it with Mirror corridor gives a tiled room.
+
+One gotcha, learned by rendering it wrong: **the camera gets folded too.** With Mirror shells,
+a camera further out than the shell spacing sits inside the folded region and sees structure
+pressed against the lens. Spacing has to exceed your viewing distance. Same reasoning applies to
+any fold with a bounded fundamental domain — if a starter looks like a wall of noise, pull the
+camera in or open the spacing up.
+
+## Current state — M0 + mirrors
+
+Shipping: the DE contract and assembler, **17 operators** (16 exact, 1 cell-local) including a
+five-op mirror group, 5 primitives, IFS recursion, orbit camera, specular reflection bounces,
+AO / soft shadows / rim / fog, orbit-trap palette colouring, five starters, progressive
+resolution, PNG export, and the validation harness (33 op variants, 174 shaders, 9 DE stacks).
 
 Next, in order: camera modes and lens projections → materials and single-bounce reflection →
 library expansion via the axis-lift wrapper → presets → the 2D post-fold stack → keyframes →
