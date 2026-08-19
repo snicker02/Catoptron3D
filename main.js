@@ -1,0 +1,500 @@
+// Catoptron 3D — UI, state, camera, render loop.
+//
+// DESIGN CONSTRAINTS HONOURED HERE (they make presets / keyframes / audio cheap later):
+//  1. All state lives in one flat, JSON-serialisable object of numbers, plus `stack`.
+//  2. renderScene(w, h) is the single draw entry point — every export path will call it.
+//  3. Every slider declares its real min/max in the DOM, so audio targets can be auto-derived.
+//  4. BUILD is logged at init, so "am I looking at the new code?" is one glance at the console.
+
+import { BUILD } from './engine/prelude.js';
+import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
+import { PRIMS, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
+import { createProgramCache } from './engine/glcache.js';
+
+console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
+
+/* ── palettes (cosine: a + b*cos(TAU*(c*t+d))) ─────────────────────────────────────────── */
+const PALETTES = [
+  { name: 'Mirror dimension', a: [.42, .44, .52], b: [.38, .36, .44], c: [1, 1, 1],    d: [.62, .70, .82] },
+  { name: 'Sanctum gold',     a: [.48, .38, .26], b: [.44, .36, .22], c: [1, 1, .8],   d: [.10, .18, .32] },
+  { name: 'Cold glass',       a: [.36, .44, .52], b: [.32, .38, .44], c: [1, 1, 1],    d: [.55, .60, .68] },
+  { name: 'Ember',            a: [.50, .28, .20], b: [.46, .26, .18], c: [1, .9, .7],  d: [.02, .12, .22] },
+  { name: 'Spectral',         a: [.50, .50, .50], b: [.50, .50, .50], c: [1, 1, 1],    d: [0, .33, .67] },
+  { name: 'Bone',             a: [.62, .60, .56], b: [.32, .32, .30], c: [1, 1, 1],    d: [.30, .32, .35] }
+];
+
+/* ── state — flat and serialisable ─────────────────────────────────────────────────────── */
+const state = {
+  // camera
+  camDist: 5.2, camAzim: 0.9, camElev: 0.35, fov: 1.3, autoSpin: 0.0,
+  // structure
+  prim: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35,
+  iters: 8, ifsScale: 1.9, ifsRotX: 0, ifsRotY: 0, ifsRotZ: 0,
+  ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
+  // march
+  steps: 128, stepScale: 0.9, maxDist: 40, eps: 0.0009,
+  // light
+  lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
+  spec: 0.55, rim: 0.9, fog: 0.35,
+  // colour
+  palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
+  // quality
+  renderScale: 0.75,
+  stack: []
+};
+
+/* ── control schema — drives the panel AND declares ranges ─────────────────────────────── */
+const GROUPS = [
+  ['Camera', [
+    ['camDist',  'Distance',    1.2, 40,  0.05, 2],
+    ['fov',      'FOV',         0.5, 3.0, 0.01, 2],
+    ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2]
+  ]],
+  ['Primitive', [
+    ['primSize',  'Size',   0.05, 3,   0.01,  2],
+    ['primRound', 'Round',  0.0,  0.6, 0.005, 3],
+    ['primAux',   'Aux',    0.02, 1.5, 0.01,  2]
+  ]],
+  ['IFS recursion', [
+    ['iters',    'Iterations',  1, 24,   1,     0],
+    ['ifsScale', 'Scale/pass',  0.3, 3.0, 0.005, 3],
+    ['ifsRotX',  'Rot X\u00b0', -180, 180, 0.5, 1],
+    ['ifsRotY',  'Rot Y\u00b0', -180, 180, 0.5, 1],
+    ['ifsRotZ',  'Rot Z\u00b0', -180, 180, 0.5, 1],
+    ['ifsCx',    'Fixed X',   -3, 3, 0.005, 3],
+    ['ifsCy',    'Fixed Y',   -3, 3, 0.005, 3],
+    ['ifsCz',    'Fixed Z',   -3, 3, 0.005, 3]
+  ]],
+  ['Lighting', [
+    ['lightAzim', 'Light azim\u00b0', 0, 360, 1,    0],
+    ['lightElev', 'Light elev\u00b0', -20, 90, 1,   0],
+    ['ambient',   'Ambient',   0, 1,   0.005, 3],
+    ['ao',        'AO',        0, 3,   0.01,  2],
+    ['shadow',    'Shadows',   0, 1,   0.01,  2],
+    ['spec',      'Specular',  0, 2,   0.01,  2],
+    ['rim',       'Rim',       0, 3,   0.01,  2],
+    ['fog',       'Fog',       0, 3,   0.01,  2]
+  ]],
+  ['Colour', [
+    ['trapScale', 'Trap scale', 0, 3,   0.005, 3],
+    ['trapShift', 'Trap shift', 0, 1,   0.005, 3],
+    ['glow',      'Glow',       0, 2,   0.01,  2],
+    ['exposure',  'Exposure',   0.2, 3, 0.01,  2],
+    ['sat',       'Saturation', 0, 2,   0.01,  2]
+  ]],
+  ['Quality', [
+    ['stepScale',   'Step scale',  0.15, 1.0, 0.01,  2],
+    ['maxDist',     'Max distance', 4, 120, 0.5,  1],
+    ['eps',         'Hit epsilon', 0.0002, 0.006, 0.0001, 4],
+    ['renderScale', 'Resolution',  0.25, 1.5, 0.05, 2]
+  ]]
+];
+
+/* ── GL bootstrap ──────────────────────────────────────────────────────────────────────── */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false });
+if(!gl){
+  document.body.innerHTML =
+    '<p style="color:#8ab8ff;font:13px ui-monospace,monospace;padding:40px">' +
+    'WebGL 2 required — Chrome, Firefox, or Safari 15+.</p>';
+  throw new Error('no webgl2');
+}
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const cache = createProgramCache(gl, { max: 24 });
+let cur = null, curSig = '', wantSig = '', wantSince = 0;
+
+const $ = id => document.getElementById(id);
+const setStat = s => { const e = $('stat'); if(e) e.textContent = s; };
+
+/* ── config derived from state (the only thing that can trigger a recompile) ───────────── */
+function currentCfg(){
+  return {
+    stack:  state.stack.map(sl => ({ type: sl.type, p: sl.p.slice() })),
+    prim:   state.prim,
+    iters:  Math.round(state.iters),
+    steps:  Math.round(state.steps),
+    ao:     state.ao > 0.001,
+    shadow: state.shadow > 0.001,
+    glow:   state.glow > 0.001
+  };
+}
+
+function syncProgram(now){
+  const cfg = currentCfg();
+  const sig = signature(cfg);
+  if(sig === curSig) return;
+  if(cache.has(cfg)){
+    const r = cache.request(cfg);
+    if(r.ready){ cur = r.entry; curSig = sig; setStat('cached \u00b7 ' + cache.size() + ' programs'); return; }
+  }
+  if(wantSig !== sig){ wantSig = sig; wantSince = now; setStat('building\u2026'); }
+  if(now - wantSince < 140) return;          // debounce: dragging past a threshold shouldn't
+  const r = cache.request(cfg);              // kick off a build every frame
+  if(r.error){
+    console.error('[catoptron3d] shader build failed\n' + r.error);
+    setStat('build failed \u2014 see console');
+    curSig = sig;                            // don't retry in a loop
+    return;
+  }
+  if(r.ready){
+    cur = r.entry; curSig = sig;
+    setStat('shader ' + Math.round(r.entry.ms) + ' ms \u00b7 ' +
+            Math.round(r.entry.src.length / 1024) + ' KB' + (cache.parallel ? '' : ' \u00b7 sync'));
+    $('boot')?.classList.add('done');
+  }
+}
+
+/* ── uniform push ──────────────────────────────────────────────────────────────────────── */
+const u1 = (L, n, v) => { if(L[n]) gl.uniform1f(L[n], v); };
+const u2 = (L, n, a, b) => { if(L[n]) gl.uniform2f(L[n], a, b); };
+const u3 = (L, n, a, b, c) => { if(L[n]) gl.uniform3f(L[n], a, b, c); };
+const u4 = (L, n, a, b, c, d) => { if(L[n]) gl.uniform4f(L[n], a, b, c, d); };
+
+function camPos(){
+  const ce = Math.cos(state.camElev), se = Math.sin(state.camElev);
+  return [Math.cos(state.camAzim) * ce * state.camDist,
+          se * state.camDist,
+          Math.sin(state.camAzim) * ce * state.camDist];
+}
+
+function renderScene(w, h){
+  if(!cur || !cur.locs) return;
+  const L = cur.locs;
+  gl.useProgram(cur.prog);
+  gl.bindVertexArray(vao);
+  gl.viewport(0, 0, w, h);
+
+  u2(L, 'uRes', w, h);
+  u1(L, 'uTime', animTime);
+
+  const cp = camPos();
+  u3(L, 'uCamPos', cp[0], cp[1], cp[2]);
+  u3(L, 'uCamTgt', 0, 0, 0);
+  u1(L, 'uFov', state.fov);
+
+  u1(L, 'uMinDist', 0.001);
+  u1(L, 'uMaxDist', state.maxDist);
+  u1(L, 'uStepScale', state.stepScale);
+  u1(L, 'uEps', state.eps);
+
+  u3(L, 'uIfsCenter', state.ifsCx, state.ifsCy, state.ifsCz);
+  u1(L, 'uIfsScale', state.ifsScale);
+  u3(L, 'uIfsRot', state.ifsRotX, state.ifsRotY, state.ifsRotZ);
+
+  u1(L, 'uPrimSize', state.primSize);
+  u1(L, 'uPrimRound', state.primRound);
+  u1(L, 'uPrimAux', state.primAux);
+
+  const la = state.lightAzim * Math.PI / 180, le = state.lightElev * Math.PI / 180;
+  u3(L, 'uLightDir', Math.cos(la) * Math.cos(le), Math.sin(le), Math.sin(la) * Math.cos(le));
+  u1(L, 'uAmbient', state.ambient);
+  u1(L, 'uAoStr', state.ao);
+  u1(L, 'uSpec', state.spec);
+  u1(L, 'uRim', state.rim);
+  u1(L, 'uFog', state.fog);
+
+  const P = PALETTES[state.palette] || PALETTES[0];
+  u3(L, 'uPal0', P.a[0], P.a[1], P.a[2]);
+  u3(L, 'uPal1', P.b[0], P.b[1], P.b[2]);
+  u3(L, 'uPal2', P.c[0], P.c[1], P.c[2]);
+  u3(L, 'uPal3', P.d[0], P.d[1], P.d[2]);
+  u3(L, 'uBgTop', 0.045, 0.055, 0.075);
+  u3(L, 'uBgBot', 0.012, 0.014, 0.020);
+  u1(L, 'uTrapScale', state.trapScale);
+  u1(L, 'uTrapShift', state.trapShift);
+  u1(L, 'uGlow', state.glow);
+  u1(L, 'uExposure', state.exposure);
+  u1(L, 'uSat', state.sat);
+
+  state.stack.forEach((sl, i) => {
+    const op = OPS[sl.type];
+    for(let b = 0; b < bankCount(op); b++){
+      u4(L, `uP${i}_${b}`,
+        sl.p[b * 4 + 0] ?? 0, sl.p[b * 4 + 1] ?? 0,
+        sl.p[b * 4 + 2] ?? 0, sl.p[b * 4 + 3] ?? 0);
+    }
+    u3(L, `uO${i}`, sl.o[0], sl.o[1], sl.o[2]);
+    u3(L, `uR${i}`, sl.r[0], sl.r[1], sl.r[2]);
+  });
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+/* ── stack ─────────────────────────────────────────────────────────────────────────────── */
+function newSlot(type){
+  return { type, p: defaults(OPS[type]), o: [0, 0, 0], r: [0, 0, 0] };
+}
+
+function addOp(type){
+  if(state.stack.length >= MAX_OPS){ setStat('stack is full (' + MAX_OPS + ')'); return; }
+  state.stack.push(newSlot(type));
+  renderStack();
+}
+
+function renderStack(){
+  const host = $('stack');
+  host.innerHTML = '';
+  state.stack.forEach((sl, i) => {
+    const op = OPS[sl.type];
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const head = document.createElement('div');
+    head.className = 'cardhead';
+    const lipTag = { exact: 'exact', bound: 'bound', repeat: 'cell' }[op.lip];
+    head.innerHTML = `<span class="cname">${i + 1}. ${op.name}</span>` +
+                     `<span class="lip lip-${op.lip}" title="DE scale factor: ${op.lip}">${lipTag}</span>`;
+    const btns = document.createElement('span');
+    btns.className = 'cbtns';
+    btns.append(
+      mkBtn('\u2191', () => { if(i > 0){ swap(i, i - 1); } }),
+      mkBtn('\u2193', () => { if(i < state.stack.length - 1){ swap(i, i + 1); } }),
+      mkBtn('\u00d7', () => { state.stack.splice(i, 1); renderStack(); })
+    );
+    head.append(btns);
+    card.append(head);
+
+    if(op.lip === 'repeat'){
+      const w = document.createElement('div');
+      w.className = 'warn';
+      w.textContent = 'Domain repeat is only distance-correct while the primitive fits inside one cell.';
+      card.append(w);
+    }
+
+    const disc = discIdx(op);
+    op.params.forEach((spec, pi) => {
+      const [label, min, max, step, , names] = spec;
+      if(names){
+        card.append(mkSelect(label, names, sl.p[pi], v => { sl.p[pi] = v; renderStack(); },
+                             disc.includes(pi)));
+      } else {
+        card.append(mkSlider(label, min, max, step, sl.p[pi], v => { sl.p[pi] = v; }));
+      }
+    });
+
+    const place = document.createElement('details');
+    place.className = 'place';
+    place.innerHTML = '<summary>placement</summary>';
+    ['X', 'Y', 'Z'].forEach((ax, k) => {
+      place.append(mkSlider('Origin ' + ax, -3, 3, 0.005, sl.o[k], v => { sl.o[k] = v; }));
+    });
+    ['X', 'Y', 'Z'].forEach((ax, k) => {
+      place.append(mkSlider('Rotate ' + ax + '\u00b0', -180, 180, 0.5, sl.r[k], v => { sl.r[k] = v; }));
+    });
+    card.append(place);
+    host.append(card);
+  });
+  if(!state.stack.length){
+    host.innerHTML = '<p class="empty">No folds yet. Add one above — ' +
+                     'Octahedral fold or Box fold is the place to start.</p>';
+  }
+}
+
+function swap(a, b){
+  const t = state.stack[a]; state.stack[a] = state.stack[b]; state.stack[b] = t;
+  renderStack();
+}
+
+/* ── widget factories (every slider carries its real min/max in the DOM) ───────────────── */
+function mkBtn(txt, fn){
+  const b = document.createElement('button');
+  b.className = 'mini'; b.textContent = txt; b.onclick = fn;
+  return b;
+}
+
+function mkSlider(label, min, max, step, val, onInput, dp){
+  const row = document.createElement('div');
+  row.className = 'ctrl';
+  const digits = dp ?? (String(step).includes('.') ? String(step).split('.')[1].length : 0);
+  const lab = document.createElement('label');
+  const out = document.createElement('span');
+  out.textContent = Number(val).toFixed(digits);
+  lab.append(document.createTextNode(label), out);
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = val;
+  inp.addEventListener('input', () => {
+    const v = parseFloat(inp.value);
+    out.textContent = v.toFixed(digits);
+    onInput(v);
+    bumpInteract();
+  });
+  row.append(lab, inp);
+  return row;
+}
+
+function mkSelect(label, names, val, onChange, isDiscrete){
+  const row = document.createElement('div');
+  row.className = 'ctrl';
+  const lab = document.createElement('label');
+  lab.append(document.createTextNode(label));
+  if(isDiscrete){
+    const t = document.createElement('span');
+    t.className = 'baked'; t.textContent = 'baked';
+    t.title = 'Compile-time literal — changing this rebuilds the shader';
+    lab.append(t);
+  }
+  const sel = document.createElement('select');
+  names.forEach((n, i) => {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = n; if(i === Math.round(val)) o.selected = true;
+    sel.append(o);
+  });
+  sel.addEventListener('change', () => onChange(parseInt(sel.value, 10)));
+  row.append(lab, sel);
+  return row;
+}
+
+/* ── panel build ───────────────────────────────────────────────────────────────────────── */
+function buildPanel(){
+  const host = $('globals');
+
+  // primitive + march steps + palette (discrete: they rebuild)
+  const g0 = section('Renderer');
+  g0.append(mkSelect('Primitive', PRIMS.map(p => p.name), state.prim,
+                     v => { state.prim = v; }, true));
+  g0.append(mkSelect('March steps', MARCH_STEPS.map(s => String(s)),
+                     MARCH_STEPS.indexOf(state.steps),
+                     v => { state.steps = MARCH_STEPS[v]; }, true));
+  g0.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
+                     v => { state.palette = v; }, false));
+  host.append(g0);
+
+  GROUPS.forEach(([title, rows]) => {
+    const g = section(title);
+    rows.forEach(([key, label, min, max, step, dp]) => {
+      g.append(mkSlider(label, min, max, step, state[key], v => { state[key] = v; }, dp));
+    });
+    host.append(g);
+  });
+
+  const addSel = $('addOp');
+  OPS.forEach((op, i) => {
+    const o = document.createElement('option');
+    o.value = i; o.textContent = op.name;
+    addSel.append(o);
+  });
+  $('addBtn').onclick = () => addOp(parseInt(addSel.value, 10));
+  $('clearBtn').onclick = () => { state.stack = []; renderStack(); };
+  $('pngBtn').onclick = savePNG;
+  $('toggle').onclick = () => $('panel').classList.toggle('hidden');
+}
+
+function section(title){
+  const d = document.createElement('div');
+  d.className = 'group';
+  const h = document.createElement('h2');
+  h.textContent = title;
+  d.append(h);
+  return d;
+}
+
+/* ── camera interaction ────────────────────────────────────────────────────────────────── */
+let drag = false, lx = 0, ly = 0;
+const keys = {};
+
+cv.addEventListener('pointerdown', e => { drag = true; lx = e.clientX; ly = e.clientY; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointerup',   e => { drag = false; });
+cv.addEventListener('pointermove', e => {
+  if(!drag) return;
+  state.camAzim -= (e.clientX - lx) * 0.007;
+  state.camElev = Math.max(-1.5, Math.min(1.5, state.camElev - (e.clientY - ly) * 0.007));
+  lx = e.clientX; ly = e.clientY;
+  bumpInteract();
+});
+cv.addEventListener('wheel', e => {
+  state.camDist = Math.max(1.2, Math.min(40, state.camDist * (1 + e.deltaY * 0.0012)));
+  syncSliderDisplay('camDist');
+  e.preventDefault(); bumpInteract();
+}, { passive: false });
+
+addEventListener('keydown', e => {
+  if(/input|select|textarea/i.test(e.target.tagName)) return;
+  keys[e.key.toLowerCase()] = true;
+  if(['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function navStep(dt){
+  const fine = keys['shift'] ? 0.25 : 1;
+  const a = 1.1 * dt * fine, z = 4.0 * dt * fine;
+  let moved = false;
+  if(keys['a'] || keys['arrowleft'])  { state.camAzim -= a; moved = true; }
+  if(keys['d'] || keys['arrowright']) { state.camAzim += a; moved = true; }
+  if(keys['w'] || keys['arrowup'])    { state.camElev = Math.min(1.5, state.camElev + a * 0.7); moved = true; }
+  if(keys['s'] || keys['arrowdown'])  { state.camElev = Math.max(-1.5, state.camElev - a * 0.7); moved = true; }
+  if(keys['q']) { state.camDist = Math.min(40, state.camDist + z); moved = true; }
+  if(keys['e']) { state.camDist = Math.max(1.2, state.camDist - z); moved = true; }
+  if(moved) bumpInteract();
+}
+
+/* ── resolution ladder: drop while the user is moving, restore when idle ───────────────── */
+let lastInteract = -1e9;
+function bumpInteract(){ lastInteract = performance.now(); }
+
+function syncSliderDisplay(){ /* sliders are one-way; camera keys/wheel don't write back */ }
+
+/* ── loop ──────────────────────────────────────────────────────────────────────────────── */
+let W = 0, H = 0, animTime = 0, lastT = 0, fpsArr = [];
+
+function frame(now){
+  const dt = Math.min((now - lastT) / 1000, 0.05) || 0.016;
+  lastT = now;
+  animTime += dt;
+  fpsArr.push(1 / dt); if(fpsArr.length > 40) fpsArr.shift();
+
+  navStep(dt);
+  state.camAzim += state.autoSpin * dt;
+
+  syncProgram(now);
+
+  const busy = (now - lastInteract) < 220;
+  const q = state.renderScale * (busy ? 0.55 : 1.0);
+  const nW = Math.max(1, Math.floor(innerWidth * q));
+  const nH = Math.max(1, Math.floor(innerHeight * q));
+  if(nW !== W || nH !== H){
+    W = nW; H = nH;
+    cv.width = W; cv.height = H;
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+  }
+
+  renderScene(W, H);
+  if(cur) $('boot')?.classList.add('done');
+
+  const fps = Math.round(fpsArr.reduce((a, b) => a + b, 0) / fpsArr.length);
+  $('fps').textContent = fps + ' fps \u00b7 ' + W + '\u00d7' + H;
+  requestAnimationFrame(frame);
+}
+
+/* ── PNG ───────────────────────────────────────────────────────────────────────────────── */
+function savePNG(){
+  if(!cur) return;
+  const pw = cv.width, ph = cv.height;
+  const sw = innerWidth * 2, sh = innerHeight * 2;
+  cv.width = sw; cv.height = sh;
+  renderScene(sw, sh);
+  const a = document.createElement('a');
+  a.href = cv.toDataURL('image/png');
+  a.download = 'catoptron3d_' + sw + 'x' + sh + '_' + Date.now() + '.png';
+  a.click();
+  cv.width = pw; cv.height = ph;
+  W = 0; H = 0;   // force a resize next frame
+}
+
+/* ── boot ──────────────────────────────────────────────────────────────────────────────── */
+buildPanel();
+// A starting stack that shows what the tool is for: octahedral mirror planes plus a box fold,
+// recursed. Both are exact isometries, so this is a mathematically clean first image.
+state.stack = [newSlot(8), newSlot(5)];
+state.stack[0].p = [0.42];
+state.stack[1].p = [1.0];
+renderStack();
+requestAnimationFrame(frame);
