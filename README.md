@@ -171,9 +171,21 @@ Two halves make a hall of mirrors, and you want both:
 - **Mirror folds** build the mirror *geometry* — Mirror corridor, Mirror room, Corner mirror,
   Mirror shells, Kaleidoscope tile.
 - **Mirror bounces** (Renderer panel) make the surfaces actually reflect *each other*. Bounce
-  count is a compile-time literal, so 0 costs nothing; 2 is usually the sweet spot. Reflectivity
-  is Schlick-weighted, so grazing angles reflect hardest — that's what makes a folded plane read
-  as glass rather than painted metal.
+  count is a compile-time literal, so 0 costs nothing; 2 is the usual sweet spot, up to 6.
+
+Three controls shape the reflection:
+
+- **Reflectivity** is the base reflectance F0 — the value you get facing a surface head-on.
+  0.85 is a strong mirror, 1.00 with Fresnel 0 is a perfect one (the surface then contributes
+  nothing of its own; you see only the environment).
+- **Fresnel edge** lifts grazing angles toward 1. At 0 it's a flat metal mirror, at 1 the
+  reflection concentrates at silhouettes, which reads as glass.
+- **Metal tint** tints the bounce by the surface hue. The tint is normalised so the brightest
+  channel stays at 1 — multiplying by a shaded colour each bounce crushed everything to black by
+  the third one, so gold came out as a dark smear instead of gold.
+
+Enclosed mirror rooms blow out at high reflectivity: light never gets absorbed, so it is
+genuinely that bright. Drop Exposure rather than Reflectivity.
 
 `Kaleidoscope tile` deserves a note: a triangle whose angles are π/p, π/q, π/r with
 1/p + 1/q + 1/r = 1 generates a wallpaper group by reflection alone, and there are exactly three
@@ -285,6 +297,36 @@ half this table was impossible.
 **Use an anisotropic primitive.** With a Sphere, Pmmm, P4/mmm and Pm-3m render *pixel-identical*
 — the point group only shows up in how it orients the motif, and a sphere has no orientation.
 Torus and Box frame reveal the differences; Sphere hides them.
+
+## User images
+
+A photo has no obvious job in a procedural 3D scene — there is no source plane to fold, which is
+the whole basis of the 2D tool. It gets two placements instead:
+
+- **Environment** — the image is treated as an equirectangular panorama and becomes the sky. It
+  therefore appears in every reflection, which is what makes a mirror surface read as real glass
+  rather than tinted plastic. This is the placement worth reaching for first.
+- **Surface texture** — triplanar projection onto the folded geometry. An implicit surface has no
+  UVs, so the photo is blended from three axis-aligned projections weighted by the normal.
+
+Both are compile-time flags: with no image loaded, or both amounts at zero, the shader contains
+no sampling code at all.
+
+**An enclosed scene never sees the environment.** Mirror room, Kaleidoscope tube and the other
+closed starters trap every ray, so nothing escapes to the background and the environment map has
+no effect no matter how high you push it. Use it on open scenes — a solid in space, the folded
+city, a Mandelbox. This is the same "the camera is inside the fold" family of surprise as the
+rest of the tool.
+
+## Export
+
+**Aspect** letterboxes the canvas inside the window, so what you frame is what you export: free,
+source image, 1:1, 4:5, 3:4, 2:3, 9:16, 4:3, 3:2, 16:9.
+
+**Export size** is a multiple of the framed view (x1 / x2 / x4) or a fixed height (1080 / 1440 /
+2160 / 2880 px), with the aspect preserved. Everything runs through the same blob-URL path as
+before, so it stays iOS-safe, and the pixel clamp still applies — a 2880-tall 16:9 export lands
+at 4096x2304 on iOS rather than failing.
 
 ### A trap worth naming once
 
