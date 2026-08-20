@@ -246,6 +246,46 @@ one. The accidental look is kept as **Fold membrane** in the Renderer panel: it 
 behaviour back deliberately, so the fold's cut planes render as visible sheets. Off by default,
 because a phantom surface is the wrong default, but it is a real effect and an on-brief one.
 
+## Crystallographic space groups
+
+`Space group` folds a point into the asymmetric unit of a crystallographic group. Twelve groups
+covering all seven crystal systems, all three cubic lattice types, and two non-symmorphic
+(screw) groups.
+
+**Why twelve and not 230.** An instancing renderer and a distance estimator solve inverse
+problems. Instancing applies symmetry operations FORWARD to place copies — cheap, general, and
+table-drivable straight from spglib. A DE needs the BACKWARD map, sending an arbitrary point
+into the asymmetric unit, and that has no general closed form. Each group is its own generator
+recipe. Adding one is a row in `SG_BODY` plus its name; importing 230 is not a thing you can do.
+
+The general escape hatch, if you ever want the full set: evaluate `min` over the orbit —
+`min(prim(g_i * p))` across all operations of the group. That IS table-drivable from spglib and
+exact, but it costs up to 192 primitive evaluations per estimator call, and the estimator is
+instantiated ~10x and called hundreds of times per ray. Fine for stills, not for a live viewport.
+
+**What decides difficulty:** reflection-generated groups fold continuously — a triangle wave is
+exactly a mirror pair — so they are exact and free. Screws, glides, pure rotations and centred
+(I, F) lattices glue space along a tear and report a `seam`. Before the seam channel existed,
+half this table was impossible.
+
+| group | system | mechanism |
+|---|---|---|
+| #1 P1, #2 P-1 | triclinic | lattice, inversion — seam |
+| #10 P2/m | monoclinic | mirror (free) + 2-fold (seam) |
+| #47 Pmmm | orthorhombic | three mirrors — continuous |
+| #123 P4/mmm | tetragonal | + diagonal mirror — continuous |
+| #191 P6/mmm | hexagonal | *632 triangle group — continuous |
+| #164 P-3m1 | trigonal | *333 triangle group — continuous |
+| #221 Pm-3m | cubic P | mirror lattice + axis sort — continuous |
+| #229 Im-3m | cubic I | body-centred Voronoi — seam |
+| #225 Fm-3m | cubic F | four sublattices — seam |
+| #19 P2(1)2(1)2(1) | orthorhombic | three 2-fold screws — seam |
+| #194 P6(3)/mmc | hexagonal | HCP, 6(3) screw — seam |
+
+**Use an anisotropic primitive.** With a Sphere, Pmmm, P4/mmm and Pm-3m render *pixel-identical*
+— the point group only shows up in how it orients the motif, and a sphere has no orientation.
+Torus and Box frame reveal the differences; Sphere hides them.
+
 ### A trap worth naming once
 
 **The camera gets folded too.** It cost three bad renders. If a starter looks like an empty
