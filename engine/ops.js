@@ -494,8 +494,153 @@ ${SG_BODY[g]}
   p *= c; s *= c;
   return p;
 }`;
+    } },
+
+  // ── MIRROR GROUP, PART TWO ──────────────────────────────────────────────────────────────
+
+  { name: 'Polyhedral mirror', fn: 'opPoly', lip: 'exact', deps: [],
+    params: [['Symmetry', 0, 2, 1, 2,
+              ['[3,3] tetrahedral \u00b724', '[4,3] octahedral \u00b748', '[5,3] icosahedral \u00b7120']],
+             ['Offset', -1.5, 1.5, 0.005, 0.7]],
+    disc: [0],
+    glsl: d => {
+      // Coxeter group [p,3]: three mirrors whose normals satisfy
+      //   n1.n2 = -cos(pi/p),  n2.n3 = -cos(pi/3) = -1/2,  n1.n3 = 0.
+      // Solving with n1 = x gives n2 = (-cos(pi/p), sin(pi/p), 0) and
+      // n3 = (0, -1/(2 sin(pi/p)), sqrt(1 - 1/(4 sin^2(pi/p)))). The p-fold axis is z.
+      const P = [3, 4, 5][d[0]];
+      const c = Math.cos(Math.PI / P), sn = Math.sin(Math.PI / P);
+      const a = -0.5 / sn, b = Math.sqrt(Math.max(0, 1 - a * a));
+      const f = v => v.toFixed(9);
+      return `vec3 opPoly_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // The finite reflection group [${P},3], order ${[24, 48, 120][d[0]]}. Icosahedral is the only
+  // one of the three with 5-fold symmetry — neither the octahedral nor the tetrahedral fold can
+  // produce it.
+  //
+  // Derived from the Coxeter relations rather than hand-picked normals. An earlier version used
+  // a single golden-ratio plane alternated with abs(); it was a perfectly good isometry, which
+  // is why the Lipschitz gate passed it, but it folded to a domain THREE TIMES LARGER than the
+  // octahedral one — the wrong group entirely. Being an isometry and being the right group are
+  // separate properties, and only a symmetry test catches the second.
+  vec3 n1 = vec3(1.0, 0.0, 0.0);
+  vec3 n2 = vec3(${f(-c)}, ${f(sn)}, 0.0);
+  vec3 n3 = vec3(0.0, ${f(a)}, ${f(b)});
+  vec3 q = p;
+  for(int i = 0; i < 12; i++){
+    bool moved = false;
+    float e1 = dot(q, n1); if(e1 > 0.0){ q -= 2.0 * e1 * n1; moved = true; }
+    float e2 = dot(q, n2); if(e2 > 0.0){ q -= 2.0 * e2 * n2; moved = true; }
+    float e3 = dot(q, n3); if(e3 > 0.0){ q -= 2.0 * e3 * n3; moved = true; }
+    if(!moved) break;              // inside the fundamental cone
+  }
+  return q - vec3(P.y);            // reflections only: isometry, s unchanged
+}`;
+    } },
+
+  { name: 'Hyperbolic mirror', fn: 'opHyp', lip: 'exact', deps: [],
+    params: [['Symmetry', 0, 2, 1, 2, ['Tetrahedral', 'Octahedral', 'Icosahedral']],
+             ['Distance', 1.02, 3, 0.005, 1.28]],
+    disc: [0],
+    glsl: d => {
+      const P = [3, 4, 5][d[0]];
+      const c = Math.cos(Math.PI / P), sn = Math.sin(Math.PI / P);
+      const a = -0.5 / sn, b = Math.sqrt(Math.max(0, 1 - a * a));
+      const f = v => v.toFixed(9);
+      const fold = [
+        `    { vec3 n1 = vec3(1.0, 0.0, 0.0);
+      vec3 n2 = vec3(${f(-c)}, ${f(sn)}, 0.0);
+      vec3 n3 = vec3(0.0, ${f(a)}, ${f(b)});
+      for(int j = 0; j < 8; j++){
+        bool mv = false;
+        float e1 = dot(q, n1); if(e1 > 0.0){ q -= 2.0 * e1 * n1; mv = true; }
+        float e2 = dot(q, n2); if(e2 > 0.0){ q -= 2.0 * e2 * n2; mv = true; }
+        float e3 = dot(q, n3); if(e3 > 0.0){ q -= 2.0 * e3 * n3; mv = true; }
+        if(!mv) break;
+      } }`
+      ][0];
+      return `vec3 opHyp_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // In the Poincare ball, reflection in a sphere ORTHOGONAL to the unit sphere is the exact
+  // analogue of a mirror in flat space — that is what a hyperbolic honeycomb is built from.
+  // A sphere centred at distance d is orthogonal to the unit sphere when its radius is
+  // sqrt(d*d - 1), so Distance is the only parameter needed to keep it a true mirror.
+  //
+  // Alternating that inversion with a finite polyhedral fold tiles hyperbolic space. Distance
+  // near 1 crowds the tiling to the rim (deep hyperbolic); larger values relax it toward the
+  // Euclidean polyhedral fold. Inversion is conformal, so the scale factor is exact.
+  vec3 q = p;
+  float d0 = max(P.y, 1.0001);
+  vec3  c  = vec3(0.0, 0.0, d0);
+  float R2 = d0 * d0 - 1.0;
+  for(int i = 0; i < 6; i++){
+${fold}
+    vec3 dz = q - c;
+    float q2 = dot(dz, dz);
+    if(q2 < R2 && q2 > 1e-9){
+      float k = R2 / q2;
+      q = c + dz * k;
+      s *= k;                      // exact: sphere inversion is conformal
+    } else break;
+  }
+  return q;
+}`;
+    } },
+
+  { name: 'Glide mirror', fn: 'opGlide', lip: 'seam', deps: ['rot3'],
+    params: [['Axis', 0, 2, 1, 1, AXIS], ['Offset', -3, 3, 0.005, 0],
+             ['Slide', -3, 3, 0.005, 0.5], ['Rotate\u00b0', -180, 180, 0.5, 0]],
+    disc: [0],
+    glsl: d => {
+      const ax = d[0];
+      const comp = 'xyz'[ax];
+      const slide = ['vec3(0.0, P.z, 0.0)', 'vec3(0.0, 0.0, P.z)', 'vec3(P.z, 0.0, 0.0)'][ax];
+      const rot = ['rotX', 'rotY', 'rotZ'][ax];
+      return `vec3 opGlide_${ax}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // A mirror that also slides (glide plane) or twists (rotary reflection, the improper axis Sn)
+  // as it reflects. Both are genuine 3D symmetry operations that a plain mirror cannot express —
+  // they are what make a stagger or an antiprism instead of a straight repeat.
+  //
+  // A plain reflection is continuous; adding the slide or the twist tears the map at the plane,
+  // so the plane is reported as a seam. Set Slide and Rotate to 0 and this is exactly Mirror
+  // plane, seam included but harmless.
+  float e = p.${comp} - P.y;
+  seam = min(seam, abs(e) / s);
+  vec3 q = p;
+  if(e > 0.0){
+    q.${comp} = P.y - e;                  // reflect
+    q += ${slide};                        // glide
+    if(abs(P.w) > 0.0001) q = ${rot}(q, P.w * DEG);   // rotary reflection
+  }
+  return q;
+}`;
+    } },
+
+  { name: 'Mirror tubes', fn: 'opTubes', lip: 'exact', deps: [],
+    params: [['Axis', 0, 2, 1, 1, AXIS], ['Spacing', 0.1, 4, 0.005, 0.8],
+             ['Offset', 0, 4, 0.01, 0]],
+    disc: [0],
+    glsl: d => {
+      const ax = d[0];
+      const grab = ['vec2(p.y, p.z)', 'vec2(p.z, p.x)', 'vec2(p.x, p.y)'][ax];
+      const put  = ['vec3(p.x, g.x, g.y)', 'vec3(g.y, p.y, g.x)', 'vec3(g.x, g.y, p.z)'][ax];
+      return `vec3 opTubes_${ax}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // Concentric CYLINDRICAL mirrors about an axis — the tube counterpart of Mirror shells.
+  // Radius folds, angle and axial position are preserved.
+  // Not an isometry: the radial and axial eigenvalues are 1, the angular one is f(r)/r, so the
+  // operator norm is max(1, f(r)/r). Declared exactly rather than bounded.
+  float D = max(P.y, 1e-3);
+  vec2 g = ${grab};
+  float r = length(g);
+  if(r < 1e-6) return p;
+  float t  = mod(r - P.z, 2.0 * D);
+  float rr = D - abs(D - t) + P.z;
+  float k  = rr / r;
+  s *= max(1.0, k);
+  g *= k;
+  return ${put};
+}`;
     } }
 ];
+
 
 
 
