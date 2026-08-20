@@ -186,12 +186,61 @@ pressed against the lens. Spacing has to exceed your viewing distance. Same reas
 any fold with a bounded fundamental domain — if a starter looks like a wall of noise, pull the
 camera in or open the spacing up.
 
-## Current state — M0 + mirrors
+## Architecture: the city primitive and the hinge fold
 
-Shipping: the DE contract and assembler, **17 operators** (16 exact, 1 cell-local) including a
-five-op mirror group, 5 primitives, IFS recursion, orbit camera, specular reflection bounces,
-AO / soft shadows / rim / fog, orbit-trap palette colouring, five starters, progressive
-resolution, PNG export, and the validation harness (33 op variants, 174 shaders, 9 DE stacks).
+The reference look is **architecture**, not solids — window grids, ledges, setbacks. No amount
+of folding turns a box frame into that, so `City` is a primitive: a block lattice with street
+width, tower height, height variance and optional facade detail. It is the most expensive
+primitive here, because a correct estimator has to scan the full 3x3 cell neighbourhood (a
+building in a neighbouring cell can be nearer than the one in yours, and missing it makes the
+estimate an over-estimate — the dangerous direction). Four cells left an 11.5% overshoot under
+gate 3; nine is clean.
+
+`Hinge fold` rotates one half-space about a hinge line by an arbitrary angle: at 90 degrees it
+stands the far half of the world up on its edge. Stack two on different axes to box the world
+into a corner.
+
+### The seam channel — why a hinge fold is even possible
+
+A rotation about a line **moves the points of the cut plane**, so the two halves are glued along
+a tear. This is not an implementation flaw: it is the reason every distance-estimated fractal
+in existence folds with `abs()`. Continuous space folding means reflection, full stop. Gate 3
+caught the first version overshooting by 70x.
+
+The fix is a third through-line channel alongside `s` and `trap`:
+
+```glsl
+vec3 opX(vec3 p, vec4 P0, inout float s, inout vec4 trap, inout float seam);
+...
+return min(prim(p) / s, seam);     // the estimator
+```
+
+An op that tears space reports its distance to the tear, in original space (so divide by the
+current `s`). Away from the seam the fold is locally isometric and the estimate holds; near it
+the marcher is bounded by the distance to the tear and can never step through. Hinge fold went
+from -70.0 to **0.00000** overshoot. `Domain repeat` uses the same mechanism and is no longer a
+second-class op — its `lip` is now `seam`, not `repeat`.
+
+Continuous folds never touch `seam`, so it costs them nothing.
+
+`Spiral vortex` is a logarithmic spiral — angle shifted by `k·ln(r)`. Distinct from `Twist`,
+which shears along an axis; this shears in the plane, which is what drives a street grid into a
+vortex. In an orthonormal polar frame the Jacobian is a constant shear, so unlike Twist its
+operator norm doesn't grow with radius.
+
+### A trap worth naming once
+
+**The camera gets folded too.** It cost three bad renders. If a starter looks like an empty
+gradient or a wall pressed against the lens, the camera is sitting inside the folded half-space
+or inside the fundamental domain. Move the fold origin, or pull the camera to the near side.
+
+## Current state — M0 + mirrors + city
+
+Shipping: the DE contract and assembler, **19 operators** (17 exact, 2 seam-clamped) including a
+five-op mirror group and the hinge/vortex architectural pair, **6 primitives** including City,
+IFS recursion, orbit camera, specular reflection bounces, sky with sun and aerial perspective,
+AO / soft shadows / rim / fog, orbit-trap palette colouring, eight starters, progressive
+resolution, PNG export, and the validation harness (39 op variants, 243 shaders, 13 DE stacks).
 
 Next, in order: camera modes and lens projections → materials and single-bounce reflection →
 library expansion via the axis-lift wrapper → presets → the 2D post-fold stack → keyframes →
