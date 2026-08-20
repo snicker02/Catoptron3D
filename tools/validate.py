@@ -81,6 +81,10 @@ uniform vec2  uRes;
 uniform float uPrimSize, uPrimRound, uPrimAux, uSeed, uSpread;
 uniform vec4  uPk0, uPk1;
 uniform vec3  uPal0, uPal1, uPal2, uPal3;
+uniform float uCityStreet, uCityHeight, uCityVar, uCityDetail;
+uniform vec3  uLightDir;
+uniform vec3  uBgTop, uBgBot;
+uniform float uSun, uHaze;
 """
 
 PROBE_TAIL = """
@@ -93,6 +97,7 @@ vec3 samplePoint(){
 
 vec3 F(vec3 p, inout float s){
   vec4 trap = vec4(1e9);
+  float seam = 1e9;
   return %(CALL)s;
 }
 
@@ -158,7 +163,7 @@ void main(){
 
 def build_call(op):
     banks = ', '.join(('uPk%d' % b) for b in range(op['banks']))
-    return "%s(p, %s, s, trap)" % (op['fn'], banks)
+    return "%s(p, %s, s, trap, seam)" % (op['fn'], banks)
 
 def gate_lipschitz(extra_ops=None, verbose=False):
     ops = DUMP['ops'] + (extra_ops or [])
@@ -262,7 +267,9 @@ def gate_de():
             FAILED.append(('DE-COMPILE', d['label'], str(e)[:300])); all_ok = False; continue
         va = quad(prog)
         for u, val in (('uPrimSize', 0.9), ('uPrimRound', 0.06), ('uPrimAux', 0.35),
-                       ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002)):
+                       ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002),
+                       ('uCityStreet', 0.28), ('uCityHeight', 0.9), ('uCityVar', 0.7),
+                       ('uCityDetail', 0.0), ('uSun', 0.0), ('uHaze', 0.0)):
             if u in prog: prog[u].value = val
         for u, val in (('uIfsCenter', (1.0, 1.0, 1.0)), ('uIfsRot', (0.0, 0.0, 0.0))):
             if u in prog: prog[u].value = val
