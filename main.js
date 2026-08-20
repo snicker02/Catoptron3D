@@ -14,13 +14,19 @@ import { createProgramCache } from './engine/glcache.js';
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
 /* ── palettes (cosine: a + b*cos(TAU*(c*t+d))) ─────────────────────────────────────────── */
+const DARK  = [[.045, .055, .075], [.012, .014, .020]];
+const DAY   = [[.58, .72, .92],     [.86, .90, .95]];
+const CLAY  = [[.80, .86, .94],     [.94, .95, .96]];
+
 const PALETTES = [
-  { name: 'Mirror dimension', a: [.42, .44, .52], b: [.38, .36, .44], c: [1, 1, 1],    d: [.62, .70, .82] },
-  { name: 'Sanctum gold',     a: [.48, .38, .26], b: [.44, .36, .22], c: [1, 1, .8],   d: [.10, .18, .32] },
-  { name: 'Cold glass',       a: [.36, .44, .52], b: [.32, .38, .44], c: [1, 1, 1],    d: [.55, .60, .68] },
-  { name: 'Ember',            a: [.50, .28, .20], b: [.46, .26, .18], c: [1, .9, .7],  d: [.02, .12, .22] },
-  { name: 'Spectral',         a: [.50, .50, .50], b: [.50, .50, .50], c: [1, 1, 1],    d: [0, .33, .67] },
-  { name: 'Bone',             a: [.62, .60, .56], b: [.32, .32, .30], c: [1, 1, 1],    d: [.30, .32, .35] }
+  { name: 'Mirror dimension', a: [.42, .44, .52], b: [.38, .36, .44], c: [1, 1, 1],    d: [.62, .70, .82], bg: DARK },
+  { name: 'Sanctum gold',     a: [.48, .38, .26], b: [.44, .36, .22], c: [1, 1, .8],   d: [.10, .18, .32], bg: DARK },
+  { name: 'Cold glass',       a: [.36, .44, .52], b: [.32, .38, .44], c: [1, 1, 1],    d: [.55, .60, .68], bg: DARK },
+  { name: 'Ember',            a: [.50, .28, .20], b: [.46, .26, .18], c: [1, .9, .7],  d: [.02, .12, .22], bg: DARK },
+  { name: 'Spectral',         a: [.50, .50, .50], b: [.50, .50, .50], c: [1, 1, 1],    d: [0, .33, .67],   bg: DARK },
+  { name: 'Bone',             a: [.62, .60, .56], b: [.32, .32, .30], c: [1, 1, 1],    d: [.30, .32, .35], bg: DARK },
+  { name: 'Clay white',       a: [.84, .84, .85], b: [.11, .11, .12], c: [1, 1, 1],    d: [.20, .24, .28], bg: CLAY },
+  { name: 'Daylight city',    a: [.58, .59, .61], b: [.26, .25, .24], c: [1, 1, 1],    d: [.45, .48, .54], bg: DAY }
 ];
 
 /* ── state — flat and serialisable ─────────────────────────────────────────────────────── */
@@ -37,6 +43,8 @@ const state = {
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, bounces: 0,
   // colour
+  cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
+  sun: 0.0, haze: 0.0,
   palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
   // quality
   renderScale: 0.75,
@@ -75,6 +83,16 @@ const GROUPS = [
     ['reflect',   'Reflectivity', 0, 1, 0.01, 2],
     ['rim',       'Rim',       0, 3,   0.01,  2],
     ['fog',       'Fog',       0, 3,   0.01,  2]
+  ]],
+  ['City', [
+    ['cityStreet', 'Street width',    0.02, 0.9, 0.005, 3],
+    ['cityHeight', 'Building height', 0.05, 4,   0.01,  2],
+    ['cityVar',    'Height variance', 0,    1,   0.01,  2],
+    ['cityDetail', 'Facade detail',   0,    1,   0.01,  2]
+  ]],
+  ['Sky', [
+    ['sun',  'Sun', 0, 2, 0.01, 2],
+    ['haze', 'Haze', 0, 2, 0.01, 2]
   ]],
   ['Colour', [
     ['trapScale', 'Trap scale', 0, 3,   0.005, 3],
@@ -209,8 +227,15 @@ function renderScene(w, h){
   u3(L, 'uPal1', P.b[0], P.b[1], P.b[2]);
   u3(L, 'uPal2', P.c[0], P.c[1], P.c[2]);
   u3(L, 'uPal3', P.d[0], P.d[1], P.d[2]);
-  u3(L, 'uBgTop', 0.045, 0.055, 0.075);
-  u3(L, 'uBgBot', 0.012, 0.014, 0.020);
+  const bg = P.bg || DARK;
+  u3(L, 'uBgTop', bg[0][0], bg[0][1], bg[0][2]);
+  u3(L, 'uBgBot', bg[1][0], bg[1][1], bg[1][2]);
+  u1(L, 'uCityStreet', state.cityStreet);
+  u1(L, 'uCityHeight', state.cityHeight);
+  u1(L, 'uCityVar', state.cityVar);
+  u1(L, 'uCityDetail', state.cityDetail);
+  u1(L, 'uSun', state.sun);
+  u1(L, 'uHaze', state.haze);
   u1(L, 'uTrapScale', state.trapScale);
   u1(L, 'uTrapShift', state.trapShift);
   u1(L, 'uGlow', state.glow);
@@ -261,6 +286,33 @@ const STARTERS = {
            bounces: 2, reflect: 0.6, ao: 0.9, fog: 0.18, camDist: 6.0, fov: 1.2,
            camAzim: 0.9, camElev: 0.24, palette: 3, trapScale: 0.55, exposure: 1.35 }
   },
+  'Folded city': {
+    stack: [{ t: 17, p: [90, -90, 0] }],
+    set: { iters: 1, ifsScale: 1.0, prim: 5, primSize: 0.42, primRound: 0.03, steps: 192,
+           bounces: 0, reflect: 0.0, ao: 1.0, fog: 0.055, haze: 0.45, sun: 1.0,
+           cityStreet: 0.34, cityHeight: 2.6, cityVar: 0.9, cityDetail: 0.0,
+           camDist: 27, fov: 1.15, camAzim: -1.5708, camElev: 0.26,
+           ambient: 0.42, spec: 0.2, rim: 0.3, palette: 7, trapScale: 0.4, trapShift: 0.25,
+           sat: 0.8, exposure: 1.12, renderScale: 0.6 }
+  },
+  'Clay corner': {
+    stack: [{ t: 17, p: [90, -90, 0] }, { t: 17, p: [0, -90, 2] }],
+    set: { iters: 1, ifsScale: 1.0, prim: 5, primSize: 0.42, primRound: 0.03, steps: 192,
+           bounces: 0, reflect: 0.0, ao: 1.0, fog: 0.055, haze: 0.35, sun: 1.0,
+           cityStreet: 0.34, cityHeight: 2.4, cityVar: 0.9, cityDetail: 0.0,
+           camDist: 26, fov: 1.25, camAzim: -2.356, camElev: 0.35,
+           ambient: 0.42, spec: 0.2, rim: 0.3, palette: 6, trapScale: 0.4, trapShift: 0.25,
+           sat: 0.8, exposure: 1.12, renderScale: 0.6 }
+  },
+  'City vortex': {
+    stack: [{ t: 18, p: [0.55, 1] }],
+    set: { iters: 2, ifsScale: 1.0, prim: 5, primSize: 0.6, primRound: 0.03, steps: 192,
+           bounces: 0, reflect: 0.0, ao: 1.0, fog: 0.09, haze: 0.4, sun: 1.0,
+           cityStreet: 0.34, cityHeight: 1.4, cityVar: 0.9, cityDetail: 0.0,
+           camDist: 20, fov: 1.25, camAzim: -1.5708, camElev: 0.78,
+           ambient: 0.42, spec: 0.2, rim: 0.3, palette: 7, trapScale: 0.4, trapShift: 0.25,
+           sat: 0.8, exposure: 1.12, renderScale: 0.6 }
+  },
   'Mandelbox (fractal)': {
     stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }, { t: 2, p: [2.0] }],
     set: { iters: 10, ifsScale: 1.0, prim: 2, primSize: 0.9, steps: 192, bounces: 0,
@@ -269,9 +321,13 @@ const STARTERS = {
   }
 };
 
+const STARTER_RESET = { sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
+                        rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
+
 function applyStarter(name){
   const st = STARTERS[name];
   if(!st) return;
+  Object.assign(state, STARTER_RESET);
   state.stack = st.stack.map(e => {
     const sl = newSlot(e.t);
     e.p.forEach((v, i) => { sl.p[i] = v; });
