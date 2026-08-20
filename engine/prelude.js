@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.4.0-spacegroups';
+export const BUILD = '0.6.0-images';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -52,6 +52,8 @@ uniform float uAmbient;
 uniform float uAoStr;
 uniform float uSpec;
 uniform float uReflect;
+uniform float uFresnel;
+uniform float uMetal;
 uniform float uRim;
 uniform float uFog;
 
@@ -60,6 +62,14 @@ uniform vec3  uPal0, uPal1, uPal2, uPal3;   // cosine palette: a + b*cos(TAU*(c*
 uniform vec3  uBgTop, uBgBot;
 uniform float uSun;
 uniform float uHaze;
+
+// user image: environment map (equirectangular) and/or triplanar surface texture
+uniform sampler2D uImg;
+uniform float uEnvAmt;
+uniform float uEnvGain;
+uniform float uEnvRot;
+uniform float uTexAmt;
+uniform float uTexScale;
 
 // city primitive
 uniform float uCityStreet;
