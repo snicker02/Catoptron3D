@@ -240,13 +240,15 @@ float rnd2(vec2 co, float k){ return fract(sin(dot(co, vec2(12.9898, 78.233)) + 
 void main(){
   vec2 f = gl_FragCoord.xy;
   vec3 p = (vec3(rnd2(f, uSeed2), rnd2(f, uSeed2 + 5.7), rnd2(f, uSeed2 + 13.1)) - 0.5) * 6.0;
-  float d = map(p);
+  vec4 tr0; float d;
+  mapT(p, tr0, d);          // the SAFE step — what the marcher actually advances by
   if(!(d > 1e-4) || d > 50.0){ fragColor = vec4(0.0, 0.0, 0.0, 0.0); return; }
 
   vec3 v = normalize(vec3(rnd2(f, uSeed2 + 23.0) - 0.5,
                           rnd2(f, uSeed2 + 37.0) - 0.5,
                           rnd2(f, uSeed2 + 51.0) - 0.5) + 1e-4);
-  float m = map(p + v * d);
+  vec4 tr1; float m;
+  mapT(p + v * d, tr1, m);
   fragColor = vec4(d, m, 1.0, 0.0);
 }
 """
