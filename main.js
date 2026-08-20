@@ -351,6 +351,22 @@ const STARTERS = {
            ambient: 0.32, spec: 0.5, rim: 0.6, palette: 5, trapScale: 0.6, trapShift: 0.15,
            sat: 1.0, exposure: 1.3, renderScale: 0.7 }
   },
+  'Icosahedral': {
+    stack: [{ t: 20, p: [2, 0.0] }, { t: 0, p: [0.0, 0.0, -1.0] }],
+    set: { iters: 3, ifsScale: 1.0, prim: 2, primSize: 0.30, primRound: 0.05, steps: 256,
+           bounces: 1, reflect: 0.55, fresnel: 0.45, metal: 0, ao: 1.0, fog: 0.15,
+           haze: 0, sun: 0, camDist: 3.4, fov: 1.3, camAzim: 0.9, camElev: 0.28,
+           ambient: 0.32, spec: 0.5, rim: 0.6, palette: 2, trapScale: 0.7, trapShift: 0.15,
+           sat: 1.0, exposure: 1.3, renderScale: 0.7 }
+  },
+  'Hyperbolic': {
+    stack: [{ t: 21, p: [2, 1.35] }, { t: 0, p: [0.0, 0.0, -0.8] }],
+    set: { iters: 2, ifsScale: 1.0, prim: 2, primSize: 0.22, primRound: 0.05, steps: 256,
+           bounces: 1, reflect: 0.55, fresnel: 0.45, metal: 0, ao: 1.0, fog: 0.15,
+           haze: 0, sun: 0, camDist: 2.8, fov: 1.3, camAzim: 0.9, camElev: 0.26,
+           ambient: 0.32, spec: 0.5, rim: 0.6, palette: 2, trapScale: 0.7, trapShift: 0.15,
+           sat: 1.0, exposure: 1.3, renderScale: 0.7 }
+  },
   'Mandelbox (fractal)': {
     stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }, { t: 2, p: [2.0] }],
     set: { iters: 10, ifsScale: 1.0, prim: 2, primSize: 0.9, steps: 192, bounces: 0,
