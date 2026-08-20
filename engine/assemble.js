@@ -22,7 +22,8 @@ export const PRIMS = [
   { name: 'Box',       fn: 'sdBox',    deps: ['sdBox'] },
   { name: 'Sphere',    fn: 'sdSphere', deps: ['sdSphere'] },
   { name: 'Octahedron',fn: 'sdOcta',   deps: ['sdOcta'] },
-  { name: 'Torus',     fn: 'sdTorus',  deps: ['sdTorus'] }
+  { name: 'Torus',     fn: 'sdTorus',  deps: ['sdTorus'] },
+  { name: 'City',      fn: 'sdCity',   deps: ['sdCity'] }
 ];
 
 export const MARCH_STEPS = [64, 96, 128, 192, 256, 384];
@@ -54,7 +55,7 @@ function foldCall(slot, i){
   return [
     `    p -= uO${i};`,
     `    p = rotE3inv(p, uR${i});`,
-    `    p = ${fnName(op, slot.p)}(p, ${banks.join(', ')}, s, trap);`,
+    `    p = ${fnName(op, slot.p)}(p, ${banks.join(', ')}, s, trap, seam);`,
     `    p = rotE3(p, uR${i});`,
     `    p += uO${i};`
   ].join('\n');
@@ -136,12 +137,15 @@ float prim(vec3 p){ return ${prim.fn}(p); }
 // primitive's distance in folded space divided back out by it.
 float mapT(vec3 p, out vec4 trap){
   float s = 1.0;
+  float seam = 1e9;
   trap = vec4(1e9);
   for(int i = 0; i < ${cfg.iters}; i++){
 ${folds}
     trap = min(trap, vec4(abs(p), dot(p, p)));${contraction}
   }
-  return prim(p) / s;
+  // min with the seam: a torn fold is safe as long as the marcher can never step across the
+  // tear. Folds that are continuous never touch seam, so this costs them nothing.
+  return min(prim(p) / s, seam);
 }
 
 float map(vec3 p){ vec4 t; return mapT(p, t); }
@@ -196,8 +200,23 @@ float march(vec3 ro, vec3 rd, out float glowAcc){
 }
 
 vec3 background(vec3 rd){
-  float up = rd.y * 0.5 + 0.5;
-  return mix(uBgBot, uBgTop, up * up);
+  vec3 L = normalize(uLightDir);
+  float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 sky = mix(uBgBot, uBgTop, pow(up, 0.75));
+  if(uSun > 0.001){
+    float sd = max(dot(rd, L), 0.0);
+    sky += vec3(1.0, 0.96, 0.88) * pow(sd, 260.0) * uSun * 3.0;   // disc
+    sky += vec3(1.0, 0.90, 0.78) * pow(sd, 6.0) * uSun * 0.16;    // forward scatter
+  }
+  return sky;
+}
+
+// Aerial perspective: distant geometry washes toward the sky it is seen against, which is what
+// gives the reference frames their depth. Plain fog to a single flat colour cannot do that.
+vec3 aerial(vec3 col, vec3 rd, float t){
+  float f = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
+  vec3 h = mix(uBgBot, uBgTop, clamp(rd.y * 0.5 + 0.5, 0.0, 1.0));
+  return mix(col, h * (1.0 + uHaze * 0.4), f);
 }
 
 vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap){
@@ -249,7 +268,7 @@ void main(){
 
     vec3 c = shadeSurface(p, n, rd, trap);
     float fg = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
-    c = mix(c, background(rd), fg);
+    c = aerial(c, rd, t);
 ${cfg.bounces > 0 ? `
     // Schlick-weighted: grazing angles reflect hardest, which is what makes a folded plane
     // read as glass rather than as painted metal.
