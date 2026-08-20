@@ -57,6 +57,56 @@ float sdFrame(vec3 p){
   return min(a1, min(a2, a3));
 }` },
 
+  sdBox3: { deps: [], src: `
+float sdBox3(vec3 p, vec3 b){
+  vec3 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}` },
+
+  // City block lattice. This is what makes a fold read as ARCHITECTURE instead of as a solid:
+  // the references are all window grids, ledges and setbacks, and no amount of folding turns a
+  // box frame into that.
+  //
+  // DE NOTE: this uses domain repetition on xz, so it measures the building in YOUR cell — but
+  // a building in a neighbouring cell can be closer, which makes the estimate an OVER-estimate,
+  // the dangerous direction. Testing only the 4 nearest cells still left an 11.5% overshoot
+  // under gate 3, so it scans the full 3x3 neighbourhood. That is the cost of a correct
+  // estimator here, and it is why City is the most expensive primitive.
+  sdCity: { deps: ['hash13', 'sdBox3'], src: `
+float cityBlock(vec2 id, vec3 p, float cell, float hw){
+  float r1 = hash13(vec3(id, 1.7));
+  float r2 = hash13(vec3(id.x + 3.7, id.y + 5.1, 2.3));
+  float h  = uCityHeight * mix(1.0, r1, uCityVar) + 0.06;
+  if(r2 < 0.13) return 1e9;                       // empty lot
+  vec2 c = (id + 0.5) * cell;
+  vec3 lp = vec3(p.x - c.x, p.y - h * 0.5, p.z - c.y);
+  float d = sdBox3(lp, vec3(hw, h * 0.5, hw));
+  if(uCityDetail > 0.001){
+    float ledge = abs(mod(p.y, 0.16 + r1 * 0.06) - 0.05) - 0.014;
+    float wx = abs(mod(lp.x, 0.11) - 0.055) - 0.026;
+    float wz = abs(mod(lp.z, 0.11) - 0.055) - 0.026;
+    float det = max(ledge, max(wx, wz) - 0.02 * uCityDetail);
+    d = mix(d, max(d, -det * 0.4), uCityDetail * 0.55);
+  }
+  return d;
+}
+float sdCity(vec3 p){
+  float cell = max(uPrimSize, 0.06);
+  float street = clamp(uCityStreet, 0.02, 0.92) * cell;
+  float hw = (cell - street) * 0.5;
+  float ground = p.y;
+  if(hw < 0.008) return ground;
+  vec2 g  = vec2(p.x, p.z) / cell;
+  vec2 id = floor(g);
+  float d = 1e9;
+  for(int j = -1; j <= 1; j++){
+    for(int i = -1; i <= 1; i++){
+      d = min(d, cityBlock(id + vec2(float(i), float(j)), p, cell, hw));
+    }
+  }
+  return min(ground, d);
+}` },
+
   // ── colour ──
   palette: { deps: [], src: `
 vec3 palette(float t){ return uPal0 + uPal1 * cos(TAU * (uPal2 * t + uPal3)); }` }
