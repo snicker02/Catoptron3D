@@ -41,12 +41,16 @@ const state = {
   steps: 128, stepScale: 0.9, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
-  spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, bounces: 0,
+  spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
   // colour
   seamSurf: 0,
   cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
   sun: 0.0, haze: 0.0,
   palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
+  // user image
+  envAmt: 0.0, envGain: 1.0, envRot: 0.0, texAmt: 0.0, texScale: 0.35,
+  // framing + export
+  aspect: 0, exportSize: 1,
   // quality
   renderScale: 0.75,
   stack: []
@@ -81,7 +85,6 @@ const GROUPS = [
     ['ao',        'AO',        0, 3,   0.01,  2],
     ['shadow',    'Shadows',   0, 1,   0.01,  2],
     ['spec',      'Specular',  0, 2,   0.01,  2],
-    ['reflect',   'Reflectivity', 0, 1, 0.01, 2],
     ['rim',       'Rim',       0, 3,   0.01,  2],
     ['fog',       'Fog',       0, 3,   0.01,  2]
   ]],
@@ -94,6 +97,13 @@ const GROUPS = [
   ['Sky', [
     ['sun',  'Sun', 0, 2, 0.01, 2],
     ['haze', 'Haze', 0, 2, 0.01, 2]
+  ]],
+  ['Image', [
+    ['envAmt',   'Environment',   0, 1,   0.01,  2],
+    ['envGain',  'Env brightness',0, 3,   0.01,  2],
+    ['envRot',   'Env rotate',    0, 1,   0.005, 3],
+    ['texAmt',   'Surface texture', 0, 1, 0.01,  2],
+    ['texScale', 'Texture scale', 0.02, 3, 0.01, 2]
   ]],
   ['Colour', [
     ['trapScale', 'Trap scale', 0, 3,   0.005, 3],
@@ -145,6 +155,8 @@ function currentCfg(){
     shadow: state.shadow > 0.001,
     glow:   state.glow > 0.001,
     seamSurf: state.seamSurf > 0.5,
+    env:      imgReady && state.envAmt > 0.001,
+    tex:      imgReady && state.texAmt > 0.001,
     bounces: Math.round(state.bounces)
   };
 }
@@ -221,6 +233,8 @@ function renderScene(w, h){
   u1(L, 'uAoStr', state.ao);
   u1(L, 'uSpec', state.spec);
   u1(L, 'uReflect', state.reflect);
+  u1(L, 'uFresnel', state.fresnel);
+  u1(L, 'uMetal', state.metal);
   u1(L, 'uRim', state.rim);
   u1(L, 'uFog', state.fog);
 
@@ -237,6 +251,16 @@ function renderScene(w, h){
   u1(L, 'uCityVar', state.cityVar);
   u1(L, 'uCityDetail', state.cityDetail);
   u1(L, 'uSun', state.sun);
+  u1(L, 'uEnvAmt', state.envAmt);
+  u1(L, 'uEnvGain', state.envGain);
+  u1(L, 'uEnvRot', state.envRot);
+  u1(L, 'uTexAmt', state.texAmt);
+  u1(L, 'uTexScale', state.texScale);
+  if(L['uImg'] && imgTex){
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, imgTex);
+    gl.uniform1i(L['uImg'], 0);
+  }
   u1(L, 'uHaze', state.haze);
   u1(L, 'uTrapScale', state.trapScale);
   u1(L, 'uTrapShift', state.trapShift);
@@ -331,7 +355,7 @@ const STARTERS = {
   }
 };
 
-const STARTER_RESET = { seamSurf: 0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
+const STARTER_RESET = { seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
 function applyStarter(name){
@@ -491,8 +515,16 @@ function buildGlobals(){
                      v => { state.steps = MARCH_STEPS[v]; }, true));
   g0.append(mkSelect('Fold membrane', ['off', 'show seams'], state.seamSurf,
                      v => { state.seamSurf = v; }, true));
-  g0.append(mkSelect('Mirror bounces', ['0 \u2014 off', '1', '2', '3', '4'],
+  g0.append(mkSelect('Mirror bounces', ['0 \u2014 off', '1', '2', '3', '4', '5', '6'],
                      state.bounces, v => { state.bounces = v; }, true));
+  g0.append(mkSlider('Reflectivity', 0, 1, 0.01, state.reflect, v => { state.reflect = v; }, 2));
+  g0.append(mkSlider('Fresnel edge', 0, 1, 0.01, state.fresnel, v => { state.fresnel = v; }, 2));
+  g0.append(mkSlider('Metal tint', 0, 1, 0.01, state.metal, v => { state.metal = v; }, 2));
+  const rn = document.createElement('p');
+  rn.className = 'note';
+  rn.textContent = 'Needs bounces > 0. 0.85 is a strong mirror; 1.00 with Fresnel 0 is perfect. '
+    + 'Enclosed mirror rooms blow out at high values \u2014 drop Exposure to compensate.';
+  g0.append(rn);
   g0.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                      v => { state.palette = v; }, false));
   host.append(g0);
@@ -509,6 +541,17 @@ function buildGlobals(){
 
 function buildPanel(){
   buildGlobals();
+  const gi = section('Image');
+  gi.append(mkSelect('Aspect', ASPECTS.map(a => a[0]), state.aspect,
+                     v => { state.aspect = v; W = 0; H = 0; }, false));
+  gi.append(mkSelect('Export size', EXPORT_SIZES.map(a => a[0]), state.exportSize,
+                     v => { state.exportSize = v; }, false));
+  $('imgpanel').append(gi);
+  $('imgFile').addEventListener('change', e => loadImageFile(e.target.files[0]));
+  $('imgBtn').onclick = () => $('imgFile').click();
+  $('imgClear').onclick = clearImage;
+  refreshImgLabel();
+
   const starters = $('starters');
   Object.keys(STARTERS).forEach(k => {
     const b = document.createElement('button');
@@ -524,7 +567,7 @@ function buildPanel(){
   });
   $('addBtn').onclick = () => addOp(parseInt(addSel.value, 10));
   $('clearBtn').onclick = () => { state.stack = []; renderStack(); };
-  $('pngBtn').onclick = savePNG;
+  $('pngBtn2').onclick = savePNG;
   $('toggle').onclick = () => $('panel').classList.toggle('hidden');
 }
 
@@ -598,13 +641,14 @@ function frame(now){
 
   const busy = (now - lastInteract) < 220;
   const q = state.renderScale * (busy ? 0.55 : 1.0);
-  const nW = Math.max(1, Math.floor(innerWidth * q));
-  const nH = Math.max(1, Math.floor(innerHeight * q));
-  if(nW !== W || nH !== H){
+  const [dw, dh] = displaySize();
+  const nW = Math.max(1, Math.floor(dw * q));
+  const nH = Math.max(1, Math.floor(dh * q));
+  if(nW !== W || nH !== H || cv.style.width !== dw + 'px'){
     W = nW; H = nH;
     cv.width = W; cv.height = H;
-    cv.style.width = innerWidth + 'px';
-    cv.style.height = innerHeight + 'px';
+    cv.style.width = dw + 'px';
+    cv.style.height = dh + 'px';
   }
 
   renderScene(W, H);
@@ -613,6 +657,101 @@ function frame(now){
   const fps = Math.round(fpsArr.reduce((a, b) => a + b, 0) / fpsArr.length);
   $('fps').textContent = fps + ' fps \u00b7 ' + W + '\u00d7' + H;
   requestAnimationFrame(frame);
+}
+
+
+/* ── user image ────────────────────────────────────────────────────────────────────────────
+   A photo has no obvious job in a procedural 3D scene — there is no source plane to fold. It
+   gets two placements instead, and the first is the one that matters here: as an equirectangular
+   ENVIRONMENT it lands in every reflection, which is what sells a mirror. As a triplanar
+   SURFACE TEXTURE it paints the folded geometry directly.
+   Both are compile-time flags, so an unused image emits no sampling code at all.             */
+let imgTex = null, imgReady = false, imgAspect = 1, imgName = '';
+
+function loadImageFile(file){
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    if(!imgTex) imgTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, imgTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    // WebGL2 handles non-power-of-two with REPEAT and mipmaps, so no resize is needed.
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    imgReady = true;
+    imgAspect = im.width / Math.max(im.height, 1);
+    imgName = file.name;
+    if(state.envAmt < 0.001 && state.texAmt < 0.001) state.envAmt = 0.85;   // show it immediately
+    URL.revokeObjectURL(url);
+    rebuildGlobals();
+    refreshImgLabel();
+    setStat('image ' + im.width + '\u00d7' + im.height);
+  };
+  im.onerror = () => { URL.revokeObjectURL(url); setStat('could not read that image'); };
+  im.src = url;
+}
+
+function clearImage(){
+  imgReady = false;
+  imgName = '';
+  state.envAmt = 0; state.texAmt = 0;
+  rebuildGlobals();
+  refreshImgLabel();
+}
+
+function refreshImgLabel(){
+  const e = $('imgName');
+  if(e) e.textContent = imgReady ? imgName : 'no image loaded';
+}
+
+/* ── framing ───────────────────────────────────────────────────────────────────────────────
+   Aspect letterboxes the canvas inside the window so what you frame is what you export.     */
+const ASPECTS = [
+  ['free (window)', 0],
+  ['source image',  -1],
+  ['1:1 square',    1],
+  ['4:5 portrait',  4 / 5],
+  ['3:4 portrait',  3 / 4],
+  ['2:3 portrait',  2 / 3],
+  ['9:16 reel',     9 / 16],
+  ['4:3 landscape', 4 / 3],
+  ['3:2 landscape', 3 / 2],
+  ['16:9 wide',     16 / 9]
+];
+
+function aspectRatio(){
+  const a = ASPECTS[state.aspect] ? ASPECTS[state.aspect][1] : 0;
+  if(a === -1) return imgReady ? imgAspect : 0;
+  return a;
+}
+
+// CSS pixel size of the canvas for the current aspect, fitted inside the window.
+function displaySize(){
+  const ar = aspectRatio();
+  if(!ar) return [innerWidth, innerHeight];
+  let w = innerWidth, h = w / ar;
+  if(h > innerHeight){ h = innerHeight; w = h * ar; }
+  return [Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h))];
+}
+
+const EXPORT_SIZES = [
+  ['\u00d71 view',   1], ['\u00d72 view', 2], ['\u00d74 view', 4],
+  ['1080 px tall', -1080], ['1440 px tall', -1440],
+  ['2160 px tall', -2160], ['2880 px tall', -2880]
+];
+
+function exportDims(){
+  const [dw, dh] = displaySize();
+  const spec = EXPORT_SIZES[state.exportSize] ? EXPORT_SIZES[state.exportSize][1] : 1;
+  if(spec > 0) return fitExport(dw * spec, dh * spec);
+  const h = -spec;
+  const ar = aspectRatio() || (dw / dh);
+  return fitExport(Math.round(h * ar), h);
 }
 
 /* ── PNG export ────────────────────────────────────────────────────────────────────────────
@@ -660,7 +799,7 @@ function offerSaveLink(url, name){
 function savePNG(){
   if(!cur){ setStat('shader still building\u2026'); return; }
 
-  const [sw, sh] = fitExport(innerWidth * 2, innerHeight * 2);
+  const [sw, sh] = exportDims();
   const pw = cv.width, ph = cv.height;
 
   cv.width = sw; cv.height = sh;
