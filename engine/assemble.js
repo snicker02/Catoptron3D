@@ -70,6 +70,7 @@ export function normalizeCfg(cfg){
     ao:     !!cfg.ao,
     shadow: !!cfg.shadow,
     glow:   !!cfg.glow,
+    seamSurf: !!cfg.seamSurf,
     bounces: Math.max(0, Math.min(4, cfg.bounces | 0))
   };
 }
@@ -83,7 +84,7 @@ export function signature(cfg){
     return sl.type + (d.length ? ':' + d.join('.') : '');
   }).join(',');
   return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
-          c.bounces, ops].join('|');
+          c.seamSurf ? 1 : 0, c.bounces, ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -135,7 +136,7 @@ float prim(vec3 p){ return ${prim.fn}(p); }
 // ── the distance estimator ──────────────────────────────────────────────────────────────
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
 // primitive's distance in folded space divided back out by it.
-float mapT(vec3 p, out vec4 trap){
+float mapT(vec3 p, out vec4 trap, out float safe){
   float s = 1.0;
   float seam = 1e9;
   trap = vec4(1e9);
@@ -143,12 +144,26 @@ float mapT(vec3 p, out vec4 trap){
 ${folds}
     trap = min(trap, vec4(abs(p), dot(p, p)));${contraction}
   }
-  // min with the seam: a torn fold is safe as long as the marcher can never step across the
-  // tear. Folds that are continuous never touch seam, so this costs them nothing.
-  return min(prim(p) / s, seam);
+  float d = prim(p) / s;
+  // The seam bounds how far the marcher may ADVANCE, but it is not a surface — unless you ask
+  // for it. Fold membrane mode returns the clamped value as the distance, so the marcher lands
+  // on the cut plane and shades it as a visible sheet. That is the accidental look this bug
+  // originally produced, kept as an opt-in effect: the mirror dimension does show you its fold
+  // planes. Off by default, because a phantom surface is the wrong default.
+  //
+  // The bug, for the record:
+  //
+  // Returning min(prim/s, seam) as one number was wrong: near a tear the value goes to zero, the
+  // hit test d < eps*t fires, and the marcher shades a phantom surface on the cut plane. It
+  // showed up as smooth contour bands that ignored iterations, IFS scale, palette, AO and step
+  // scale but tracked epsilon — the signature of a false hit, not of geometry. So the distance
+  // and the safe step are now separate outputs: hit-test against the true distance, advance by
+  // the clamped one.
+  safe = min(d, seam);
+  return ${cfg.seamSurf ? 'safe' : 'd'};
 }
 
-float map(vec3 p){ vec4 t; return mapT(p, t); }
+float map(vec3 p){ vec4 t; float sf; return mapT(p, t, sf); }
 
 vec3 calcNormal(vec3 p, float t){
   float e = max(uEps * t, 1e-5);
@@ -190,10 +205,12 @@ float march(vec3 ro, vec3 rd, out float glowAcc){
   glowAcc = 0.0;
   for(int i = 0; i < ${cfg.steps}; i++){
     vec3 p = ro + rd * t;
-    float d = map(p);
-    if(d < uEps * t) return t;
+    vec4 tr;
+    float safe;
+    float d = mapT(p, tr, safe);
+    if(d < uEps * t) return t;                 // hit test: TRUE distance only
     ${cfg.glow ? 'glowAcc += 1.0 / (1.0 + d * d * 340.0);' : ''}
-    t += max(d * uStepScale, uEps * t);
+    t += max(safe * uStepScale, uEps * t);     // advance: clamped by any seam
     if(t > uMaxDist) break;
   }
   return -1.0;
@@ -264,7 +281,8 @@ void main(){
     vec3 p = ro + rd * t;
     vec3 n = calcNormal(p, t);
     vec4 trap;
-    mapT(p, trap);
+    float safeIgn;
+    mapT(p, trap, safeIgn);
 
     vec3 c = shadeSurface(p, n, rd, trap);
     float fg = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
