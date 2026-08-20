@@ -228,6 +228,24 @@ which shears along an axis; this shears in the plane, which is what drives a str
 vortex. In an orthonormal polar frame the Jacobian is a constant shear, so unlike Twist its
 operator norm doesn't grow with radius.
 
+### Fold membrane — the seam as a visible surface
+
+`min(prim/s, seam)` is the right number to ADVANCE by and the wrong number to hit-test against.
+Returning it as a single value made the marcher stop on the cut plane and shade a phantom
+surface — smooth contour bands that ignored iterations, IFS scale, palette, AO and step scale
+but tracked the hit epsilon. That combination is the signature of a false hit rather than of
+geometry, and it is worth remembering as a diagnostic: **if changing epsilon changes a feature
+but changing step scale does not, you are looking at the hit test, not the surface.**
+
+Gate 3 did not catch it, and could not have: it tests whether the estimator is a valid bound,
+and the clamped value IS a valid bound. Being safe to step by and being a surface are different
+properties.
+
+The two are now separate outputs — hit-test against the true distance, advance by the clamped
+one. The accidental look is kept as **Fold membrane** in the Renderer panel: it puts the old
+behaviour back deliberately, so the fold's cut planes render as visible sheets. Off by default,
+because a phantom surface is the wrong default, but it is a real effect and an on-brief one.
+
 ### A trap worth naming once
 
 **The camera gets folded too.** It cost three bad renders. If a starter looks like an empty
