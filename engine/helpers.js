@@ -107,6 +107,30 @@ float sdCity(vec3 p){
   return min(ground, d);
 }` },
 
+  // Crystallographic utilities.
+  sgUtil: { deps: [], src: `
+// Mirrored unit lattice — a triangle wave IS the reflection sequence of a mirror pair, so this
+// is continuous and 1-Lipschitz. Every reflection-generated space group is built from it.
+vec3 tri3(vec3 p){ return abs(mod(p, 2.0) - 1.0); }
+
+// Sort components descending with explicit temps (never swizzle-write from a swizzle read).
+// Three diagonal mirror planes; together with tri3 this is the m-3m point group.
+vec3 sortDesc3(vec3 q){
+  if(q.x < q.y){ float t = q.x; q.x = q.y; q.y = t; }
+  if(q.x < q.z){ float t = q.x; q.x = q.z; q.z = t; }
+  if(q.y < q.z){ float t = q.y; q.y = q.z; q.z = t; }
+  return q;
+}
+
+// Distance from p to the perpendicular bisector of two lattice centres — the wall of the
+// Voronoi cell. This is the seam for any centred (I, F) lattice fold.
+float bisectDist(vec3 p, vec3 c1, vec3 c2){
+  vec3 d = c2 - c1;
+  float L = length(d);
+  if(L < 1e-6) return 1e9;
+  return abs(dot(p - 0.5 * (c1 + c2), d / L));
+}` },
+
   // ── colour ──
   palette: { deps: [], src: `
 vec3 palette(float t){ return uPal0 + uPal1 * cos(TAU * (uPal2 * t + uPal3)); }` }
