@@ -39,6 +39,21 @@ body{background:#06080c;overflow:hidden;font-family:var(--disp);color:var(--txt)
   scrollbar-width:thin;scrollbar-color:var(--scroll) transparent;
 }
 #panel.hidden{transform:translateX(-100%)}
+#panelR{
+  position:fixed;top:0;right:0;width:300px;height:100vh;z-index:100;
+  background:linear-gradient(180deg,var(--hdr1),var(--panel));
+  border-left:1px solid var(--edge);
+  overflow-y:auto;padding:14px 13px 40px;
+  transition:transform .24s ease;
+  scrollbar-width:thin;scrollbar-color:var(--scroll) transparent;
+}
+#panelR.hidden{transform:translateX(100%)}
+#panelR::-webkit-scrollbar{width:5px}
+#panelR::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
+.ptitle{
+  font-family:var(--mono);font-size:10px;letter-spacing:.28em;color:var(--h1b);
+  text-transform:uppercase;margin-bottom:10px;
+}
 #panel::-webkit-scrollbar{width:5px}
 #panel::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
 
@@ -134,24 +149,26 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
 .place[open] summary::before{content:'\25BE  '}
 .empty{font-family:var(--mono);font-size:10px;color:var(--note);line-height:1.7}
 
-#toggle{position:fixed;top:12px;left:312px;z-index:200}
-#panel.hidden ~ #toggle{left:12px}
+#toggle{position:fixed;top:12px;left:312px;z-index:200;transition:left .24s ease}
+#toggleR{position:fixed;top:12px;right:312px;z-index:200;transition:right .24s ease}
+#toggle.tucked{left:12px}
+#toggleR.tucked{right:12px}
 #hud{
-  position:fixed;bottom:10px;right:12px;z-index:120;text-align:right;
+  position:fixed;bottom:10px;left:12px;z-index:120;text-align:left;
   font-family:var(--mono);font-size:10px;color:var(--note);line-height:1.7;
   pointer-events:none;
 }
 #hud b{color:var(--ice1);font-weight:400}
 #boot{
-  position:fixed;top:50%;left:calc(50% + 150px);transform:translate(-50%,-50%);
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
   font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--ice1);
   z-index:150;pointer-events:none;
 }
 #boot.done{display:none}
 @media (prefers-reduced-motion:reduce){#panel{transition:none}}
-@media (max-width:720px){
+@media (max-width:1180px){
   #panel{width:min(88vw,300px)}
-  #toggle{left:12px}
+  #panelR{width:min(88vw,300px)}
 }
 </style>
 </head>
@@ -188,6 +205,13 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <div id="starters" class="starters"></div>
   </div>
 
+  <div id="globals"></div>
+</div>
+
+<button id="toggleR" aria-label="Toggle structure panel">☷</button>
+
+<div id="panelR">
+  <div class="ptitle">Structure</div>
   <div class="group">
     <h2>Fold stack</h2>
     <div class="row">
@@ -199,8 +223,7 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
       <button id="clearBtn">clear stack</button>
     </div>
   </div>
-
-  <div id="globals"></div>
+  <div id="globalsR"></div>
 </div>
 
 <button id="toggle" aria-label="Toggle panel">☰</button>
