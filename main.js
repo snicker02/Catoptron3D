@@ -43,6 +43,7 @@ const state = {
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, bounces: 0,
   // colour
+  seamSurf: 0,
   cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
   sun: 0.0, haze: 0.0,
   palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
@@ -143,6 +144,7 @@ function currentCfg(){
     ao:     state.ao > 0.001,
     shadow: state.shadow > 0.001,
     glow:   state.glow > 0.001,
+    seamSurf: state.seamSurf > 0.5,
     bounces: Math.round(state.bounces)
   };
 }
@@ -321,7 +323,7 @@ const STARTERS = {
   }
 };
 
-const STARTER_RESET = { sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
+const STARTER_RESET = { seamSurf: 0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
 function applyStarter(name){
@@ -479,6 +481,8 @@ function buildGlobals(){
   g0.append(mkSelect('March steps', MARCH_STEPS.map(s => String(s)),
                      MARCH_STEPS.indexOf(state.steps),
                      v => { state.steps = MARCH_STEPS[v]; }, true));
+  g0.append(mkSelect('Fold membrane', ['off', 'show seams'], state.seamSurf,
+                     v => { state.seamSurf = v; }, true));
   g0.append(mkSelect('Mirror bounces', ['0 \u2014 off', '1', '2', '3', '4'],
                      state.bounces, v => { state.bounces = v; }, true));
   g0.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
