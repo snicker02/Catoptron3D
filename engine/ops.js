@@ -28,6 +28,147 @@
 
 const AXIS = ['X', 'Y', 'Z'];
 
+const SG_NAMES = [
+  '#1  P1  (triclinic)',
+  '#2  P-1  (triclinic)',
+  '#10 P2/m  (monoclinic)',
+  '#47 Pmmm  (orthorhombic)',
+  '#123 P4/mmm  (tetragonal)',
+  '#191 P6/mmm  (hexagonal)',
+  '#164 P-3m1  (trigonal)',
+  '#221 Pm-3m  (cubic P)',
+  '#229 Im-3m  (cubic I)',
+  '#225 Fm-3m  (cubic F)',
+  '#19 P2\u20812\u20812\u2081  (screw)',
+  '#194 P6\u2083/mmc  (HCP screw)'
+];
+
+// true where the recipe tears space and must report a seam
+const SG_SEAM = [true, true, true, false, false, false, false, false, true, true, true, true];
+
+const SG_BODY = [
+
+/* 0 — P1. Lattice translations only: the primitive cell, no point symmetry at all.
+      A pure translation fold tears at the cell walls, so it reports them. */
+`  vec3 q = p - round(p);
+  seam = min(seam, min(0.5 - abs(q.x), min(0.5 - abs(q.y), 0.5 - abs(q.z))) / s);
+  p = q;`,
+
+/* 1 — P-1. P1 plus a centre of inversion. Inversion is orientation-reversing and glues the
+      two halves across the plane z = 0, so that plane is a seam too. */
+`  vec3 q = p - round(p);
+  seam = min(seam, min(0.5 - abs(q.x), min(0.5 - abs(q.y), 0.5 - abs(q.z))) / s);
+  seam = min(seam, abs(q.z) / s);
+  if(q.z < 0.0) q = -q;
+  p = q;`,
+
+/* 2 — P2/m. Monoclinic, unique axis b: a mirror perpendicular to b (continuous) and a 2-fold
+      rotation about b (a tear). Note the mirror costs nothing and the rotation costs a seam —
+      the whole story of this table in one group. */
+`  vec3 q = vec3(p.x - round(p.x), abs(mod(p.y, 2.0) - 1.0), p.z - round(p.z));
+  seam = min(seam, min(0.5 - abs(q.x), 0.5 - abs(q.z)) / s);
+  seam = min(seam, abs(q.x) / s);
+  if(q.x < 0.0) q = vec3(-q.x, q.y, -q.z);
+  p = q;`,
+
+/* 3 — Pmmm. Three mutually perpendicular mirrors on a primitive lattice. Entirely reflection
+      generated, so it is continuous and seam-free. */
+`  p = tri3(p);`,
+
+/* 4 — P4/mmm. Pmmm plus the diagonal mirror that promotes the 2-fold to a 4-fold about c. */
+`  vec3 q = tri3(p);
+  if(q.x < q.y){ float t = q.x; q.x = q.y; q.y = t; }
+  p = q;`,
+
+/* 5 — P6/mmm. The *632 planar reflection group in the a-b plane (the same Euclidean triangle
+      group as Kaleidoscope tile) crossed with a mirror lattice along c. Reflections only. */
+`  vec2 g = vec2(p.x, p.y);
+  for(int i = 0; i < 8; i++){
+    bool moved = false;
+    { vec2 n = vec2(0.0, -1.0);       float e = dot(g, n);        if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(1.0, 0.0);        float e = dot(g, n) - 0.5;  if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(-0.5, 0.8660254); float e = dot(g, n);        if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    if(!moved) break;
+  }
+  p = vec3(g.x, g.y, abs(mod(p.z, 2.0) - 1.0));`,
+
+/* 6 — P-3m1. Trigonal. The *333 Euclidean triangle group in the a-b plane (equilateral
+      fundamental domain, three mirrors) crossed with a mirror lattice along c.
+      NOTE: this slot originally held R-3m, which was wrong — I folded the 3-fold sector but
+      omitted the rhombohedral centring, so it produced a single empty wedge instead of a
+      crystal. P-3m1 gives genuine trigonal symmetry and, being reflection-generated, is
+      continuous and seam-free. R-3m needs the R-centring translations to be done properly. */
+`  vec2 g = vec2(p.x, p.y);
+  for(int i = 0; i < 8; i++){
+    bool moved = false;
+    { vec2 n = vec2(0.0, -1.0);            float e = dot(g, n);              if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(0.8660254, 0.5);       float e = dot(g, n) - 0.4330127;  if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(-0.8660254, 0.5);      float e = dot(g, n);              if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    if(!moved) break;
+  }
+  p = vec3(g.x, g.y, abs(mod(p.z, 2.0) - 1.0));`,
+
+/* 7 — Pm-3m. Full cubic symmetry: mirror lattice plus the three diagonal mirrors. This is the
+      highest-symmetry space group and, pleasingly, one of the cheapest folds here. */
+`  p = sortDesc3(tri3(p));`,
+
+/* 8 — Im-3m. Body-centred cubic. The lattice fold is a Voronoi choice between the corner and
+      body-centre sublattices, so the cell wall is a bisector plane — that is the seam. */
+`  vec3 c1 = round(p);
+  vec3 c2 = round(p - 0.5) + 0.5;
+  vec3 a = p - c1;
+  vec3 b = p - c2;
+  seam = min(seam, bisectDist(p, c1, c2) / s);
+  vec3 q = dot(a, a) < dot(b, b) ? a : b;
+  p = sortDesc3(abs(q));`,
+
+/* 9 — Fm-3m. Face-centred cubic: four sublattices, so four candidate centres and three
+      bisector walls to report. */
+`  vec3 o0 = vec3(0.0, 0.0, 0.0), o1 = vec3(0.0, 0.5, 0.5);
+  vec3 o2 = vec3(0.5, 0.0, 0.5), o3 = vec3(0.5, 0.5, 0.0);
+  vec3 c0 = round(p - o0) + o0, c1 = round(p - o1) + o1;
+  vec3 c2 = round(p - o2) + o2, c3 = round(p - o3) + o3;
+  vec3 best = c0; float bd = dot(p - c0, p - c0);
+  float d1 = dot(p - c1, p - c1); if(d1 < bd){ bd = d1; best = c1; }
+  float d2 = dot(p - c2, p - c2); if(d2 < bd){ bd = d2; best = c2; }
+  float d3 = dot(p - c3, p - c3); if(d3 < bd){ bd = d3; best = c3; }
+  float w = 1e9;
+  if(best != c0) w = min(w, bisectDist(p, best, c0));
+  if(best != c1) w = min(w, bisectDist(p, best, c1));
+  if(best != c2) w = min(w, bisectDist(p, best, c2));
+  if(best != c3) w = min(w, bisectDist(p, best, c3));
+  seam = min(seam, w / s);
+  p = sortDesc3(abs(p - best));`,
+
+/* 10 — P2(1)2(1)2(1). Three mutually perpendicular 2-fold SCREW axes and nothing else: the
+       classic non-symmorphic group, and the most common one in protein crystals. A screw is a
+       rotation composed with a fractional translation, so every one of them is a tear. */
+`  vec3 q = p - round(p);
+  seam = min(seam, min(0.5 - abs(q.x), min(0.5 - abs(q.y), 0.5 - abs(q.z))) / s);
+  seam = min(seam, abs(q.x - 0.25) / s);
+  if(q.x > 0.25) q = vec3(0.5 - q.x, -q.y, q.z + 0.5);
+  seam = min(seam, abs(q.y - 0.25) / s);
+  if(q.y > 0.25) q = vec3(-q.x, 0.5 - q.y, q.z + 0.5);
+  p = q - round(q);`,
+
+/* 11 — P6(3)/mmc. Hexagonal close packing: the *632 net with a 6(3) screw stacking the layers,
+       which is what makes HCP rather than a simple hexagonal prism. */
+`  vec3 q = p;
+  seam = min(seam, abs(q.z - 0.5) / s);
+  if(q.z > 0.5){ float aa = 3.14159265359;
+    q = vec3(cos(aa) * q.x - sin(aa) * q.y, sin(aa) * q.x + cos(aa) * q.y, q.z - 0.5); }
+  vec2 g = vec2(q.x, q.y);
+  for(int i = 0; i < 8; i++){
+    bool moved = false;
+    { vec2 n = vec2(0.0, -1.0);       float e = dot(g, n);        if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(1.0, 0.0);        float e = dot(g, n) - 0.5;  if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    { vec2 n = vec2(-0.5, 0.8660254); float e = dot(g, n);        if(e > 0.0){ g -= 2.0 * e * n; moved = true; } }
+    if(!moved) break;
+  }
+  p = vec3(g.x, g.y, abs(mod(q.z, 2.0) - 1.0));`
+];
+
+
 export const OPS = [
 
   { name: 'Translate', fn: 'opTranslate', lip: 'exact', deps: [],
@@ -318,8 +459,44 @@ ${refl}
   q = r * vec2(cos(a), sin(a));
   return ${put};
 }`;
+    } },
+
+  // ── CRYSTALLOGRAPHIC SPACE GROUPS ───────────────────────────────────────────────────────
+  // A space group is a discrete group of isometries of R3: a Bravais lattice, plus a point
+  // group, plus (for the non-symmorphic ones) screw axes and glide planes.
+  //
+  // Folding one into a distance estimator is the INVERSE of what an instancing renderer does.
+  // An instancing tool applies the symmetry operations forward to place copies, which is cheap
+  // and works for all 230 straight out of a table. A DE needs the backward map — send an
+  // arbitrary point into the asymmetric unit — and that has no general closed form, so each
+  // group is its own generator recipe. Hence a curated table, not an import.
+  //
+  // The split that decides difficulty:
+  //   REFLECTION-generated groups fold continuously (a triangle wave is exactly a mirror pair),
+  //     so they are exact, free, and need no seam.
+  //   SCREWS, GLIDES and pure ROTATIONS glue space along a tear, like Hinge fold. They report a
+  //     seam, and are only usable because the estimator carries that channel.
+  //
+  // Adding a group is one entry in SG_BODY plus its name. Coordinates inside a body are in
+  // CELL UNITS; the wrapper handles scaling, and because seam is divided by the live s it comes
+  // out in world units automatically.
+
+  { name: 'Space group', fn: 'opSG', lip: 'seam', deps: ['sgUtil'],
+    params: [['Group', 0, 11, 1, 7, SG_NAMES], ['Cell', 0.15, 6, 0.01, 1.2]],
+    disc: [0],
+    glsl: d => {
+      const g = d[0];
+      return `vec3 opSG_${g}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // ${SG_NAMES[g]}
+  float c = max(P.y, 1e-3);
+  p /= c; s /= c;                     // work in cell units; the two scalings cancel
+${SG_BODY[g]}
+  p *= c; s *= c;
+  return p;
+}`;
     } }
 ];
+
 
 
 
