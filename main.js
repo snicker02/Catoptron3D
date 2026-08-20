@@ -315,6 +315,14 @@ const STARTERS = {
            ambient: 0.42, spec: 0.2, rim: 0.3, palette: 7, trapScale: 0.4, trapShift: 0.25,
            sat: 0.8, exposure: 1.12, renderScale: 0.6 }
   },
+  'Crystal lattice': {
+    stack: [{ t: 19, p: [7, 1.2] }],
+    set: { iters: 1, ifsScale: 1.0, prim: 4, primSize: 0.24, primRound: 0.04, primAux: 0.075,
+           steps: 256, bounces: 0, reflect: 0.0, ao: 1.0, fog: 0.10, haze: 0, sun: 0,
+           camDist: 13, fov: 0.95, camAzim: 0.85, camElev: 0.55,
+           ambient: 0.32, spec: 0.5, rim: 0.6, palette: 5, trapScale: 0.6, trapShift: 0.15,
+           sat: 1.0, exposure: 1.3, renderScale: 0.7 }
+  },
   'Mandelbox (fractal)': {
     stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }, { t: 2, p: [2.0] }],
     set: { iters: 10, ifsScale: 1.0, prim: 2, primSize: 0.9, steps: 192, bounces: 0,
