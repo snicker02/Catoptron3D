@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.6.0-images';
+export const BUILD = '0.7.0-two-rails';
 
 export const VS = `#version 300 es
 in vec2 aPos;
