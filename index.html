@@ -25,8 +25,9 @@
   color-scheme:dark;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);overflow:hidden;font-family:var(--disp);color:var(--txt)}
-#c{display:block;position:fixed;inset:0;cursor:grab;background:var(--canv1)}
+body{background:#06080c;overflow:hidden;font-family:var(--disp);color:var(--txt)}
+#c{display:block;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  cursor:grab;background:var(--canv1);box-shadow:0 0 0 1px var(--edge2)}
 #c:active{cursor:grabbing}
 
 #panel{
@@ -98,6 +99,7 @@ button:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .row select{flex:1}
 .starters{display:flex;flex-wrap:wrap;gap:5px}
 .starters button{flex:1 1 calc(50% - 3px);text-align:left;font-size:10px;padding:6px 8px}
+.note{font-family:var(--mono);font-size:9px;line-height:1.6;color:var(--note);margin:2px 0 8px}
 .savelink{margin-top:6px}
 .savelink a{font-family:var(--mono);font-size:10px;color:var(--ice1);text-decoration:underline;
   display:inline-block;padding:4px 0;line-height:1.5}
@@ -165,6 +167,23 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
   <hr>
 
   <div class="group">
+    <h2>Image &amp; export</h2>
+    <div class="row">
+      <button id="imgBtn">load image</button>
+      <button id="imgClear">clear</button>
+    </div>
+    <div id="imgName" class="note">no image loaded</div>
+    <input type="file" id="imgFile" accept="image/*" hidden>
+    <div id="imgpanel"></div>
+    <div class="row" style="margin-top:6px">
+      <button id="pngBtn2">export PNG</button>
+    </div>
+    <div id="savelink" class="savelink"></div>
+    <p class="note">A photo has no plane to fold in 3D, so it lands as the environment (seen in
+    every reflection) or as a triplanar surface texture. Sliders are in the Image group below.</p>
+  </div>
+
+  <div class="group">
     <h2>Starters</h2>
     <div id="starters" class="starters"></div>
   </div>
@@ -178,9 +197,7 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <div id="stack"></div>
     <div class="row" style="margin-top:8px">
       <button id="clearBtn">clear stack</button>
-      <button id="pngBtn">save PNG</button>
     </div>
-    <div id="savelink" class="savelink"></div>
   </div>
 
   <div id="globals"></div>
