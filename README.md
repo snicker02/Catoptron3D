@@ -41,8 +41,6 @@ Two consequences that invert the 2D intuition:
 
 ---
 
-## Layout
-
 ```
 index.html          markup + CSS, loads main.js as a module
 main.js             state, UI, camera, render loop, PNG export
@@ -56,6 +54,19 @@ tools/
   dump.mjs          dumps op sources + assembled shaders to JSON
   validate.py       the three gates, run against real GL headlessly
 ```
+
+## Interface
+
+Two rails, split by what they answer:
+
+- **Right — Structure.** What you are building: Fold stack, Renderer (primitive, membrane,
+  mirror bounces and material), IFS recursion, Primitive dimensions, City.
+- **Left — Look and output.** How it is presented: Image & export, Starters, Camera, Lighting,
+  Sky, Image placement, Colour, Quality.
+
+Either rail toggles independently. Above 1180px they reserve width and the canvas is centred in
+what is left; below that they overlay, because two 300px rails plus a usable viewport does not
+fit on a tablet — at 1024px reserving both would leave a 424px slot to work in.
 
 ## Running
 
