@@ -339,6 +339,45 @@ source image, 1:1, 4:5, 3:4, 2:3, 9:16, 4:3, 3:2, 16:9.
 before, so it stays iOS-safe, and the pixel clamp still applies — a 2880-tall 16:9 export lands
 at 4096x2304 on iOS rather than failing.
 
+## The mirror operators
+
+| op | mechanism | cost |
+|---|---|---|
+| Mirror plane | one reflection | free |
+| Mirror corridor | parallel pair — the infinite corridor | free |
+| Mirror room | three orthogonal pairs — the infinity room | free |
+| Corner mirror | three mirrors at a point (retroreflector) | free |
+| Mirror shells | concentric SPHERICAL mirrors | exact, s = max(1, f(r)/r) |
+| Mirror tubes | concentric CYLINDRICAL mirrors about an axis | exact, same form |
+| Kaleidoscope tile | *632 / *442 / *333 planar groups, extruded | free |
+| Polyhedral mirror | [3,3] 24, [4,3] 48, [5,3] 120 | free |
+| Hyperbolic mirror | polyhedral fold + inversion in an orthogonal sphere | exact, conformal |
+| Glide mirror | reflection plus a slide or a twist | seam |
+| Space group | 12 crystallographic groups | mixed |
+
+**Polyhedral mirror** is derived from the Coxeter relations for [p,3]: three mirrors with
+n1.n2 = -cos(pi/p), n2.n3 = -1/2, n1.n3 = 0. Icosahedral is the only one of the three with
+5-fold symmetry.
+
+An earlier icosahedral fold used a single hand-picked golden-ratio plane alternated with abs().
+It was a perfectly good isometry — which is why the Lipschitz gate passed it — but it folded to
+a domain THREE TIMES LARGER than the octahedral one, so it was the wrong group entirely. **Being
+an isometry and being the right group are separate properties**, and only a symmetry test catches
+the second: fold(R p) must equal fold(p) for R in the group. The derived version is invariant
+under its p-fold rotation to 6e-7, and correctly NOT invariant under a rotation outside the group.
+
+**Hyperbolic mirror** works in the Poincare ball, where reflection in a sphere orthogonal to the
+unit sphere is the exact analogue of a flat mirror. A sphere centred at distance d is orthogonal
+when its radius is sqrt(d*d - 1), so Distance is the only parameter needed to keep it a true
+mirror. Alternating that with a polyhedral fold tiles hyperbolic space: near 1 crowds the tiling
+to the rim, larger relaxes toward the Euclidean fold.
+
+**Polyhedral and hyperbolic folds fix the origin.** A primitive centred at the origin is
+invariant under them and renders as a single untouched shape — the symmetry is real but invisible.
+Put a Translate AFTER the fold (the primitive is evaluated on the FINAL coordinate, so an offset
+placed before the fold does nothing useful), or use the fold's own Offset, which defaults to 0.7
+for exactly this reason.
+
 ### A trap worth naming once
 
 **The camera gets folded too.** It cost three bad renders. If a starter looks like an empty
