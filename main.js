@@ -63,11 +63,6 @@ const GROUPS = [
     ['fov',      'FOV',         0.5, 3.0, 0.01, 2],
     ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2]
   ]],
-  ['Primitive', [
-    ['primSize',  'Size',   0.05, 3,   0.01,  2],
-    ['primRound', 'Round',  0.0,  0.6, 0.005, 3],
-    ['primAux',   'Aux',    0.02, 1.5, 0.01,  2]
-  ]],
   ['IFS recursion', [
     ['iters',    'Iterations',  1, 24,   1,     0],
     ['ifsScale', 'Scale/pass',  0.3, 3.0, 0.005, 3],
@@ -77,6 +72,11 @@ const GROUPS = [
     ['ifsCx',    'Fixed X',   -3, 3, 0.005, 3],
     ['ifsCy',    'Fixed Y',   -3, 3, 0.005, 3],
     ['ifsCz',    'Fixed Z',   -3, 3, 0.005, 3]
+  ]],
+  ['Primitive', [
+    ['primSize',  'Size',   0.05, 3,   0.01,  2],
+    ['primRound', 'Round',  0.0,  0.6, 0.005, 3],
+    ['primAux',   'Aux',    0.02, 1.5, 0.01,  2]
   ]],
   ['Lighting', [
     ['lightAzim', 'Light azim\u00b0', 0, 360, 1,    0],
@@ -119,6 +119,10 @@ const GROUPS = [
     ['renderScale', 'Resolution',  0.25, 1.5, 0.05, 2]
   ]]
 ];
+
+/* Groups that belong on the STRUCTURE panel (right). Everything else is look and output, and
+   stays on the left. The split is "what am I building" vs "how is it presented". */
+const RIGHT_GROUPS = new Set(['Primitive', 'IFS recursion', 'City']);
 
 /* ── GL bootstrap ──────────────────────────────────────────────────────────────────────── */
 const cv = document.getElementById('c');
@@ -500,11 +504,13 @@ function mkSelect(label, names, val, onChange, isDiscrete){
 /* ── panel build ───────────────────────────────────────────────────────────────────────── */
 function rebuildGlobals(){
   $('globals').innerHTML = '';
+  $('globalsR').innerHTML = '';
   buildGlobals();
 }
 
 function buildGlobals(){
-  const host = $('globals');
+  const host  = $('globals');
+  const hostR = $('globalsR');
 
   // primitive + march steps + palette (discrete: they rebuild)
   const g0 = section('Renderer');
@@ -525,16 +531,18 @@ function buildGlobals(){
   rn.textContent = 'Needs bounces > 0. 0.85 is a strong mirror; 1.00 with Fresnel 0 is perfect. '
     + 'Enclosed mirror rooms blow out at high values \u2014 drop Exposure to compensate.';
   g0.append(rn);
-  g0.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
-                     v => { state.palette = v; }, false));
-  host.append(g0);
+  hostR.append(g0);
 
   GROUPS.forEach(([title, rows]) => {
     const g = section(title);
+    if(title === 'Colour'){
+      g.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
+                        v => { state.palette = v; }, false));
+    }
     rows.forEach(([key, label, min, max, step, dp]) => {
       g.append(mkSlider(label, min, max, step, state[key], v => { state[key] = v; }, dp));
     });
-    host.append(g);
+    (RIGHT_GROUPS.has(title) ? hostR : host).append(g);
   });
 
 }
@@ -568,7 +576,8 @@ function buildPanel(){
   $('addBtn').onclick = () => addOp(parseInt(addSel.value, 10));
   $('clearBtn').onclick = () => { state.stack = []; renderStack(); };
   $('pngBtn2').onclick = savePNG;
-  $('toggle').onclick = () => $('panel').classList.toggle('hidden');
+  $('toggle').onclick  = () => { $('panel').classList.toggle('hidden'); relayout(); };
+  $('toggleR').onclick = () => { $('panelR').classList.toggle('hidden'); relayout(); };
 }
 
 function section(title){
@@ -649,6 +658,7 @@ function frame(now){
     cv.width = W; cv.height = H;
     cv.style.width = dw + 'px';
     cv.style.height = dh + 'px';
+    cv.style.left = (padL + (availW || innerWidth) * 0.5) + 'px';
   }
 
   renderScene(W, H);
@@ -724,6 +734,30 @@ const ASPECTS = [
   ['16:9 wide',     16 / 9]
 ];
 
+/* ── layout ────────────────────────────────────────────────────────────────────────────────
+   The canvas is centred in whatever space the panels leave. Below 1180px the rails overlay
+   instead of reserving width: two 300px panels plus a usable viewport does not fit on a tablet,
+   and at 1024px reserving both would leave a 424px slot to work in.                           */
+let padL = 0, availW = 0;
+
+function relayout(){
+  const wide = innerWidth >= 1180;
+  const lOpen = !$('panel').classList.contains('hidden');
+  const rOpen = !$('panelR').classList.contains('hidden');
+  padL = (wide && lOpen) ? 300 : 0;
+  const padR = (wide && rOpen) ? 300 : 0;
+  availW = Math.max(160, innerWidth - padL - padR);
+  $('toggle').classList.toggle('tucked', !lOpen);
+  $('toggleR').classList.toggle('tucked', !rOpen);
+  // keep the readout and the boot message over the canvas, not under a panel
+  const hud = $('hud'), boot = $('boot');
+  if(hud) hud.style.left = (padL + 12) + 'px';
+  if(boot) boot.style.left = (padL + availW * 0.5) + 'px';
+  W = 0; H = 0;                       // force the frame loop to resize
+}
+
+addEventListener('resize', relayout);
+
 function aspectRatio(){
   const a = ASPECTS[state.aspect] ? ASPECTS[state.aspect][1] : 0;
   if(a === -1) return imgReady ? imgAspect : 0;
@@ -732,9 +766,10 @@ function aspectRatio(){
 
 // CSS pixel size of the canvas for the current aspect, fitted inside the window.
 function displaySize(){
+  const aw = availW || innerWidth;
   const ar = aspectRatio();
-  if(!ar) return [innerWidth, innerHeight];
-  let w = innerWidth, h = w / ar;
+  if(!ar) return [aw, innerHeight];
+  let w = aw, h = w / ar;
   if(h > innerHeight){ h = innerHeight; w = h * ar; }
   return [Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h))];
 }
@@ -857,6 +892,7 @@ function savePNG(){
 
 /* ── boot ──────────────────────────────────────────────────────────────────────────────── */
 buildPanel();
+relayout();
 // A starting stack that shows what the tool is for: octahedral mirror planes plus a box fold,
 // recursed. Both are exact isometries, so this is a mathematically clean first image.
 state.stack = [newSlot(8), newSlot(5)];
