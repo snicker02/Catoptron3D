@@ -71,7 +71,9 @@ export function normalizeCfg(cfg){
     shadow: !!cfg.shadow,
     glow:   !!cfg.glow,
     seamSurf: !!cfg.seamSurf,
-    bounces: Math.max(0, Math.min(4, cfg.bounces | 0))
+    env:      !!cfg.env,
+    tex:      !!cfg.tex,
+    bounces: Math.max(0, Math.min(6, cfg.bounces | 0))
   };
 }
 
@@ -84,7 +86,7 @@ export function signature(cfg){
     return sl.type + (d.length ? ':' + d.join('.') : '');
   }).join(',');
   return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
-          c.seamSurf ? 1 : 0, c.bounces, ops].join('|');
+          c.seamSurf ? 1 : 0, c.env ? 1 : 0, c.tex ? 1 : 0, c.bounces, ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -225,6 +227,13 @@ vec3 background(vec3 rd){
     sky += vec3(1.0, 0.96, 0.88) * pow(sd, 260.0) * uSun * 3.0;   // disc
     sky += vec3(1.0, 0.90, 0.78) * pow(sd, 6.0) * uSun * 0.16;    // forward scatter
   }
+${cfg.env ? `
+  // Equirectangular environment map. This is the placement that matters for a mirror tool: the
+  // photo lands in every reflection, which is what makes a folded plane read as real glass
+  // rather than as tinted plastic.
+  vec2 euv = vec2(atan(rd.z, rd.x) / TAU + 0.5 + uEnvRot,
+                  acos(clamp(rd.y, -1.0, 1.0)) / PI);
+  sky = mix(sky, texture(uImg, euv).rgb * uEnvGain, uEnvAmt);` : ''}
   return sky;
 }
 
@@ -236,9 +245,19 @@ vec3 aerial(vec3 col, vec3 rd, float t){
   return mix(col, h * (1.0 + uHaze * 0.4), f);
 }
 
-vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap){
+vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap, out vec3 albedo){
   float ct = clamp(sqrt(max(trap.w, 0.0)) * uTrapScale + uTrapShift, 0.0, 1.0);
   vec3 base = palette(ct);
+${cfg.tex ? `
+  // Triplanar projection — no UVs exist on an implicit surface, so the photo is blended from
+  // three axis-aligned projections weighted by the normal.
+  vec3 an = abs(n);
+  an /= max(an.x + an.y + an.z, 1e-4);
+  vec3 tx = texture(uImg, vec2(p.y, p.z) * uTexScale).rgb * an.x
+          + texture(uImg, vec2(p.x, p.z) * uTexScale).rgb * an.y
+          + texture(uImg, vec2(p.x, p.y) * uTexScale).rgb * an.z;
+  base = mix(base, tx, uTexAmt);` : ''}
+  albedo = base;
 
   float aoV = ${cfg.ao ? 'calcAO(p, n)' : '1.0'};
   vec3  L   = normalize(uLightDir);
@@ -284,17 +303,29 @@ void main(){
     float safeIgn;
     mapT(p, trap, safeIgn);
 
-    vec3 c = shadeSurface(p, n, rd, trap);
+    vec3 base;
+    vec3 c = shadeSurface(p, n, rd, trap, base);
     float fg = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
     c = aerial(c, rd, t);
 ${cfg.bounces > 0 ? `
-    // Schlick-weighted: grazing angles reflect hardest, which is what makes a folded plane
-    // read as glass rather than as painted metal.
-    float F = uReflect * mix(0.18, 1.0, pow(1.0 - max(dot(n, -rd), 0.0), 5.0)) * (1.0 - fg);
+    // Schlick, with the BASE reflectance as the control rather than a hardcoded constant.
+    //
+    // This used to read uReflect * mix(0.18, 1.0, pow(...)), which capped head-on reflection at
+    // 18% of the slider — full value only appeared at grazing angles. A real mirror is ~95% at
+    // every angle. Now Reflectivity IS F0, and Fresnel separately controls how much the grazing
+    // angle lifts it toward 1: Fresnel 0 is a flat metal mirror, 1 is glassy edge-heavy falloff.
+    float ct = clamp(dot(n, -rd), 0.0, 1.0);
+    float F0 = clamp(uReflect, 0.0, 1.0);
+    float F  = (F0 + (1.0 - F0) * uFresnel * pow(1.0 - ct, 5.0)) * (1.0 - fg);
     if(b == ${cfg.bounces}){ accum += atten * c; break; }
     accum += atten * c * (1.0 - F);
-    atten *= F;
-    if(max(atten.r, max(atten.g, atten.b)) < 0.006) break;
+    // Metals tint what they reflect; dielectrics don't. The tint is NORMALISED so the brightest
+    // channel stays at 1 — multiplying by a shaded colour each bounce crushed everything to
+    // black by the third one. This carries hue without costing energy, which is what makes gold
+    // read as gold through a stack of bounces instead of as a dark smear.
+    vec3 tint = base / max(max(base.r, base.g), max(base.b, 1e-4));
+    atten *= F * mix(vec3(1.0), tint, uMetal);
+    if(max(atten.r, max(atten.g, atten.b)) < 0.004) break;
     ro = p + n * max(uEps * t, 1e-5) * 6.0;
     rd = reflect(rd, n);` : `
     accum += atten * c;
