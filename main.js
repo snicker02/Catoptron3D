@@ -547,19 +547,105 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 
-/* ── PNG ───────────────────────────────────────────────────────────────────────────────── */
-function savePNG(){
-  if(!cur) return;
-  const pw = cv.width, ph = cv.height;
-  const sw = innerWidth * 2, sh = innerHeight * 2;
-  cv.width = sw; cv.height = sh;
-  renderScene(sw, sh);
+/* ── PNG export ────────────────────────────────────────────────────────────────────────────
+   iOS notes, learned from a real 404 report:
+
+   1. NEVER use canvas.toDataURL() for a full-size export. A 2048x2732 PNG base64-encodes to
+      tens of MB, which is far past Safari's URL length limit. Safari then fails to parse the
+      string as a data: URL and falls back to treating it as a RELATIVE PATH — so the browser
+      requests something like /Catoptron3D/data:image/png;base64,iVBOR... and the host answers
+      404. Desktop Chrome and Firefox tolerate huge data URLs, so this only shows up on iOS.
+      toBlob + createObjectURL gives a short URL and fixes it.
+
+   2. Safari caps canvas backing-store area (~16.7 MP on iOS 12+, and a 4096 max dimension).
+      Past that the allocation is silently refused or comes back blank, so clamp before
+      rendering rather than after.
+
+   3. The download attribute is unreliable on iOS. The share sheet is the real "save to Photos"
+      path, so try it first — but toBlob is async and the user-gesture window can expire, so
+      always leave a visible tap-to-save link as a guaranteed manual fallback.                */
+
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const MAX_EXPORT_PX  = IS_IOS ? 16.0e6 : 80e6;
+const MAX_EXPORT_DIM = IS_IOS ? 4096   : 16384;
+
+function fitExport(w, h){
+  let k = Math.min(1, MAX_EXPORT_DIM / Math.max(w, h));
+  const px = w * k * h * k;
+  if(px > MAX_EXPORT_PX) k *= Math.sqrt(MAX_EXPORT_PX / px);
+  return [Math.max(1, Math.floor(w * k)), Math.max(1, Math.floor(h * k))];
+}
+
+function offerSaveLink(url, name){
+  const host = $('savelink');
+  host.innerHTML = '';
   const a = document.createElement('a');
-  a.href = cv.toDataURL('image/png');
-  a.download = 'catoptron3d_' + sw + 'x' + sh + '_' + Date.now() + '.png';
-  a.click();
-  cv.width = pw; cv.height = ph;
-  W = 0; H = 0;   // force a resize next frame
+  a.href = url;
+  a.download = name;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.textContent = IS_IOS ? 'tap to open \u2014 then long-press to save' : 'download ' + name;
+  host.append(a);
+}
+
+function savePNG(){
+  if(!cur){ setStat('shader still building\u2026'); return; }
+
+  const [sw, sh] = fitExport(innerWidth * 2, innerHeight * 2);
+  const pw = cv.width, ph = cv.height;
+
+  cv.width = sw; cv.height = sh;
+  if(cv.width !== sw || cv.height !== sh){          // allocation refused outright
+    cv.width = pw; cv.height = ph; W = 0; H = 0;
+    setStat('export size refused by the browser');
+    return;
+  }
+  renderScene(cv.width, cv.height);
+  if(gl.isContextLost()){
+    setStat('context lost during export \u2014 reload and try a smaller window');
+    return;
+  }
+
+  const outW = cv.width, outH = cv.height;
+  const name = 'catoptron3d_' + outW + 'x' + outH + '_' + Date.now() + '.png';
+  const restore = () => { cv.width = pw; cv.height = ph; W = 0; H = 0; };
+
+  if(!cv.toBlob){                                    // very old browser
+    restore();
+    setStat('this browser cannot export PNG');
+    return;
+  }
+
+  setStat('encoding ' + outW + '\u00d7' + outH + '\u2026');
+  cv.toBlob(async blob => {
+    restore();
+    if(!blob){ setStat('export failed \u2014 try a smaller window'); return; }
+
+    const url = URL.createObjectURL(blob);
+    offerSaveLink(url, name);                        // always available, whatever else happens
+
+    if(IS_IOS && navigator.canShare){
+      try {
+        const file = new File([blob], name, { type: 'image/png' });
+        if(navigator.canShare({ files: [file] })){
+          await navigator.share({ files: [file], title: 'Catoptron 3D' });
+          setStat('saved \u00b7 ' + outW + '\u00d7' + outH);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          return;
+        }
+      } catch(e){
+        if(e && e.name === 'AbortError'){ setStat('export cancelled'); return; }
+        // otherwise fall through to the link below
+      }
+    }
+
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.append(a); a.click(); a.remove();
+    setStat('saved ' + outW + '\u00d7' + outH + ' \u00b7 or use the link');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }, 'image/png');
 }
 
 /* ── boot ──────────────────────────────────────────────────────────────────────────────── */
