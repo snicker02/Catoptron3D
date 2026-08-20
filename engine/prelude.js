@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.2.1-ios-export';
+export const BUILD = '0.3.0-city';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -58,6 +58,14 @@ uniform float uFog;
 // colour
 uniform vec3  uPal0, uPal1, uPal2, uPal3;   // cosine palette: a + b*cos(TAU*(c*t + d))
 uniform vec3  uBgTop, uBgBot;
+uniform float uSun;
+uniform float uHaze;
+
+// city primitive
+uniform float uCityStreet;
+uniform float uCityHeight;
+uniform float uCityVar;
+uniform float uCityDetail;
 uniform float uTrapScale;
 uniform float uTrapShift;
 uniform float uGlow;
