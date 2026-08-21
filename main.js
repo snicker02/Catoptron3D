@@ -37,8 +37,9 @@ const state = {
   prim: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35,
   iters: 8, ifsScale: 1.9, ifsRotX: 0, ifsRotY: 0, ifsRotZ: 0,
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
+  feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  steps: 128, stepScale: 0.9, maxDist: 40, eps: 0.0009,
+  steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
@@ -71,7 +72,11 @@ const GROUPS = [
     ['ifsRotZ',  'Rot Z\u00b0', -180, 180, 0.5, 1],
     ['ifsCx',    'Fixed X',   -3, 3, 0.005, 3],
     ['ifsCy',    'Fixed Y',   -3, 3, 0.005, 3],
-    ['ifsCz',    'Fixed Z',   -3, 3, 0.005, 3]
+    ['ifsCz',    'Fixed Z',   -3, 3, 0.005, 3],
+    ['bailout',  'Bailout',    1.5, 24, 0.1,  1],
+    ['juliaCx',  'Julia C x', -2, 2, 0.005, 3],
+    ['juliaCy',  'Julia C y', -2, 2, 0.005, 3],
+    ['juliaCz',  'Julia C z', -2, 2, 0.005, 3]
   ]],
   ['Primitive', [
     ['primSize',  'Size',   0.05, 3,   0.01,  2],
@@ -159,6 +164,7 @@ function currentCfg(){
     shadow: state.shadow > 0.001,
     glow:   state.glow > 0.001,
     seamSurf: state.seamSurf > 0.5,
+    feedback: Math.round(state.feedback),
     env:      imgReady && state.envAmt > 0.001,
     tex:      imgReady && state.texAmt > 0.001,
     bounces: Math.round(state.bounces)
@@ -226,6 +232,8 @@ function renderScene(w, h){
   u3(L, 'uIfsCenter', state.ifsCx, state.ifsCy, state.ifsCz);
   u1(L, 'uIfsScale', state.ifsScale);
   u3(L, 'uIfsRot', state.ifsRotX, state.ifsRotY, state.ifsRotZ);
+  u1(L, 'uBailout', state.bailout);
+  u3(L, 'uJuliaC', state.juliaCx, state.juliaCy, state.juliaCz);
 
   u1(L, 'uPrimSize', state.primSize);
   u1(L, 'uPrimRound', state.primRound);
@@ -367,15 +375,37 @@ const STARTERS = {
            ambient: 0.32, spec: 0.5, rim: 0.6, palette: 2, trapScale: 0.7, trapShift: 0.15,
            sat: 1.0, exposure: 1.3, renderScale: 0.7 }
   },
-  'Mandelbox (fractal)': {
-    stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }, { t: 2, p: [2.0] }],
-    set: { iters: 10, ifsScale: 1.0, prim: 2, primSize: 0.9, steps: 192, bounces: 0,
-           reflect: 0.0, ao: 1.0, fog: 0.3, camDist: 6.5, fov: 1.2, camAzim: 0.9,
-           camElev: 0.3, palette: 4, trapScale: 0.35, exposure: 1.25 }
+  'Mandelbox': {
+    stack: [{ t: 5, p: [1.0] }, { t: 6, p: [0.5, 1.0] }],
+    set: { iters: 12, ifsScale: 2.0, ifsCx: 0, ifsCy: 0, ifsCz: 0, feedback: 1, bailout: 20,
+           prim: 2, primSize: 0.0, steps: 768, stepScale: 0.85, eps: 0.00006, maxDist: 120,
+           bounces: 0, reflect: 0, ao: 1.0, fog: 0.02,
+           camDist: 22, fov: 1.1, camAzim: 0.9, camElev: 0.28,
+           ambient: 0.30, spec: 0.5, rim: 0.5, palette: 4, trapScale: 0.10, trapShift: 0.15,
+           exposure: 1.3, renderScale: 0.55 }
+  },
+  'Mandelbulb': {
+    stack: [{ t: 25, p: [8] }],
+    set: { iters: 10, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0, feedback: 1, bailout: 4,
+           prim: 2, primSize: 0.0, steps: 512, stepScale: 0.85, eps: 0.00018, maxDist: 40,
+           bounces: 0, reflect: 0, ao: 1.0, fog: 0.10,
+           camDist: 2.5, fov: 1.2, camAzim: 0.9, camElev: 0.30,
+           ambient: 0.30, spec: 0.5, rim: 0.5, palette: 5, trapScale: 1.1, trapShift: 0.15,
+           exposure: 1.3, renderScale: 0.6 }
+  },
+  'Menger sponge': {
+    stack: [{ t: 24, p: [3, 2] }],
+    set: { iters: 4, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0, feedback: 0,
+           prim: 1, primSize: 1.0, primRound: 0.02, steps: 256, stepScale: 0.85,
+           eps: 0.0005, maxDist: 40, bounces: 0, reflect: 0, ao: 1.0, fog: 0.10,
+           camDist: 4.2, fov: 1.2, camAzim: 0.9, camElev: 0.30,
+           ambient: 0.30, spec: 0.5, rim: 0.5, palette: 5, trapScale: 0.4, trapShift: 0.15,
+           exposure: 1.3, renderScale: 0.7 }
   }
 };
 
-const STARTER_RESET = { seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
+const STARTER_RESET = { feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
+                        primRound: 0.06, primAux: 0.35, juliaCx: 0, juliaCy: 0, juliaCz: 0, seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
 function applyStarter(name){
@@ -551,6 +581,16 @@ function buildGlobals(){
 
   GROUPS.forEach(([title, rows]) => {
     const g = section(title);
+    if(title === 'IFS recursion'){
+      g.append(mkSelect('Feedback',
+        ['off \u2014 pure IFS', 'orbit (Mandelbrot)', 'constant (Julia)'],
+        state.feedback, v => { state.feedback = v; }, true));
+      const n = document.createElement('p');
+      n.className = 'note';
+      n.textContent = 'Feedback re-adds a point each pass, turning the attractor into an '
+        + 'escape-time set \u2014 Mandelbox, Mandelbulb, Julia. Needs iterations > 1.';
+      g.append(n);
+    }
     if(title === 'Colour'){
       g.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                         v => { state.palette = v; }, false));
