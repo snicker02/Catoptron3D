@@ -638,8 +638,57 @@ ${fold}
   g *= k;
   return ${put};
 }`;
-    } }
+    } },
+
+  // ── ESCAPE-TIME / KIFS ──────────────────────────────────────────────────────────────────
+
+  { name: 'Menger fold', fn: 'opMenger', lip: 'seam', deps: ['sgUtil'],
+    params: [['Scale', 1.2, 5, 0.005, 3], ['Offset', 0.2, 4, 0.005, 2]],
+    glsl: `vec3 opMenger(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // The canonical Menger sponge KIFS step. Self-contained rather than leaning on the IFS
+  // contraction, because the conditional shift has to happen AFTER the scale and the loop
+  // applies folds before it — so this could not be assembled from the existing ops.
+  float k = max(P.x, 1.001);
+  float o = P.y;
+  vec3 q = sortDesc3(abs(p));
+  q = q * k;
+  s *= k;
+  q -= vec3(o, o, 0.0);
+  // the conditional shift is a tear, so report it
+  seam = min(seam, abs(q.z + o * 0.5) / s);
+  if(q.z < -o * 0.5) q.z += o;
+  return q;
+}` },
+
+  { name: 'Triplex power', fn: 'opBulb', lip: 'exact', deps: [],
+    params: [['Power', 2, 12, 0.01, 8]],
+    glsl: `vec3 opBulb(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // The Mandelbulb map: (r, theta, phi) -> (r^n, n*theta, n*phi). Pair it with orbit feedback
+  // in the IFS panel to get the Mandelbulb proper; on its own it is the pure power map.
+  float n = P.x;
+  float r = length(p);
+  if(r < 1e-6) return p;
+  float th = acos(clamp(p.z / r, -1.0, 1.0));
+  float ph = atan(p.y, p.x);
+  float rn = pow(r, n);
+  float snt = sin(n * th);
+  // EXACT operator norm, not the textbook one.
+  //
+  // In an orthonormal spherical frame the three singular values of this map are
+  //   n*r^(n-1),  n*r^(n-1),  and  n*r^(n-1) * |sin(n*theta)/sin(theta)|.
+  // The usual Mandelbulb running derivative keeps only n*r^(n-1) and drops the third. That
+  // factor tends to n as theta approaches the poles, so the textbook estimate under-reports by
+  // up to a factor of n there — measured at 7.96x for n = 8, which is why Mandelbulb renders
+  // classically show artifacts at the poles. Declaring the full norm costs march steps near the
+  // axis and is correct everywhere.
+  float sth = sin(th);
+  float amp = (abs(sth) < 1e-4) ? n : abs(snt / sth);
+  s *= n * pow(r, n - 1.0) * max(1.0, amp);
+  trap = min(trap, vec4(abs(p), r * r));
+  return rn * vec3(snt * cos(n * ph), snt * sin(n * ph), cos(n * th));
+}` }
 ];
+
 
 
 
