@@ -26,7 +26,7 @@ export const PRIMS = [
   { name: 'City',      fn: 'sdCity',   deps: ['sdCity'] }
 ];
 
-export const MARCH_STEPS = [64, 96, 128, 192, 256, 384];
+export const MARCH_STEPS = [64, 96, 128, 192, 256, 384, 512, 768];
 
 // transitive closure of helper deps, emitted in dependency order
 function resolveHelpers(names){
@@ -71,6 +71,7 @@ export function normalizeCfg(cfg){
     shadow: !!cfg.shadow,
     glow:   !!cfg.glow,
     seamSurf: !!cfg.seamSurf,
+    feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
     tex:      !!cfg.tex,
     bounces: Math.max(0, Math.min(6, cfg.bounces | 0))
@@ -86,7 +87,8 @@ export function signature(cfg){
     return sl.type + (d.length ? ':' + d.join('.') : '');
   }).join(',');
   return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
-          c.seamSurf ? 1 : 0, c.env ? 1 : 0, c.tex ? 1 : 0, c.bounces, ops].join('|');
+          c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
+          c.bounces, ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -120,11 +122,24 @@ export function assemble(cfgIn){
 
   // The IFS contraction. Emitted only when iterating, so iters == 1 is byte-identical to a
   // plain single pass of the stack — same guarantee the 2D tool gives when IFS is off.
+  // The IFS contraction, plus optional ESCAPE-TIME feedback.
+  //
+  // Without feedback this is a pure iterated function system: the attractor of the fold stack.
+  // Mandelbox, Mandelbulb and the quaternion Julias are NOT that — each pass re-adds a point,
+  // p = scale*p + c, which turns the attractor into an escape-time set. Two things are needed
+  // and neither existed before:
+  //   1. the ORIGINAL sample point p0 must survive into the loop, and
+  //   2. the derivative recurrence becomes ADDITIVE: dr = dr*|scale| + 1, because d(p0)/d(p0)
+  //      is 1. A purely multiplicative s cannot express that, and using one gives a DE that is
+  //      wrong by a growing factor.
+  // A fixed Julia constant contributes no derivative, so only the orbit mode adds the 1.
+  const feedTerm = ['', '\n      p += p0;\n      s = s + 1.0;',
+                        '\n      p += uJuliaC;'][cfg.feedback];
   const contraction = cfg.iters > 1 ? `
     {
       vec3 d = rotE3((p - uIfsCenter) * uIfsScale, uIfsRot);
       p = d + uIfsCenter;
-      s *= uIfsScale;                 // exact: rotation is free, uniform scale is k
+      s *= uIfsScale;                 // exact: rotation is free, uniform scale is k${feedTerm}
     }` : '';
 
   return `${PRELUDE}
@@ -139,11 +154,16 @@ float prim(vec3 p){ return ${prim.fn}(p); }
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
 // primitive's distance in folded space divided back out by it.
 float mapT(vec3 p, out vec4 trap, out float safe){
+  vec3 p0 = p;                        // the original sample point, for escape-time feedback
   float s = 1.0;
   float seam = 1e9;
   trap = vec4(1e9);
   for(int i = 0; i < ${cfg.iters}; i++){
-${folds}
+${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to infinity in a few passes and the
+    // estimate is garbage; with it the orbit freezes at the escape point, which is what the
+    // classic |p|/dr formula is evaluated at.
+    if(dot(p, p) > uBailout * uBailout) break;
+` : ''}${folds}
     trap = min(trap, vec4(abs(p), dot(p, p)));${contraction}
   }
   float d = prim(p) / s;
