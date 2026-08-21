@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.8.0-mirrors3';
+export const BUILD = '0.9.0-kifs';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -40,6 +40,8 @@ uniform float uEps;
 uniform vec3  uIfsCenter;
 uniform float uIfsScale;
 uniform vec3  uIfsRot;      // degrees per pass
+uniform vec3  uJuliaC;      // constant added per pass in Julia feedback mode
+uniform float uBailout;     // escape radius; the orbit stops iterating past it
 
 // primitive
 uniform float uPrimSize;
