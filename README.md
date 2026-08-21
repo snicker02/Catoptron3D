@@ -378,6 +378,54 @@ Put a Translate AFTER the fold (the primitive is evaluated on the FINAL coordina
 placed before the fold does nothing useful), or use the fold's own Offset, which defaults to 0.7
 for exactly this reason.
 
+## KIFS and escape-time
+
+The IFS loop already **is** a KIFS loop: `p = scale*(p - c) + c` with a per-pass rotation is the
+classic `p = p*scale - offset` form, `s` accumulates `scale^N` so the DE convention matches, and
+a pre-fold rotation is expressible by putting a Rotate op ahead of the fold in the stack.
+Octahedral fold + scale 2 is a KIFS; box fold + sphere fold is Mandelbox geometry.
+
+What was missing was the **escape-time** half, and it was architectural rather than a missing op.
+Mandelbox, Mandelbulb and the Julias are not attractors — each pass re-adds a point,
+`p = scale*p + c`, which turns the attractor into an escape-time set. Three things are needed:
+
+1. **The original sample point must survive into the loop.** `mapT` now keeps `p0`.
+2. **The derivative recurrence becomes additive:** `dr = dr*|scale| + 1`, because d(p0)/d(p0) is
+   1. A purely multiplicative `s` cannot express that and gives a DE wrong by a growing factor.
+   A fixed Julia constant contributes no derivative, so only the orbit mode adds the 1.
+3. **A bailout.** Without one a power map runs to infinity in a few passes and the estimate is
+   garbage. The orbit freezes at the escape point, which is where the classic `|p|/dr` is
+   evaluated.
+
+These are the **Feedback** control in the IFS panel (off / orbit / constant), plus Bailout and
+Julia C. Two ops complete the set:
+
+- **Menger fold** — the canonical sponge step. Self-contained rather than leaning on the IFS
+  contraction, because its conditional shift has to happen *after* the scale and the loop applies
+  folds *before* it, so it could not be assembled from existing ops.
+- **Triplex power** — the Mandelbulb map. Pair it with orbit feedback for the Mandelbulb proper.
+
+### The textbook Mandelbulb derivative is wrong, and by how much
+
+Gate 2 rejected the standard running derivative `n*r^(n-1)` at **7.96x under-reported** for n = 8.
+That is not noise: in an orthonormal spherical frame the three singular values are
+`n*r^(n-1)`, `n*r^(n-1)`, and `n*r^(n-1) * |sin(n*theta)/sin(theta)|`. The textbook estimate drops
+the third, and that factor tends to **n** at the poles — 8 for n = 8, matching the measurement.
+
+So the classic Mandelbulb DE is not a valid lower bound near the poles, which is exactly where
+Mandelbulb renders have always shown artifacts. Catoptron declares the full norm instead: correct
+everywhere, at the cost of more march steps near the axis.
+
+### Measured step-scale requirements
+
+The default step scale is **0.85**, and that number is measured rather than chosen: the Mandelbox
+with orbit feedback overshoots by 16.3% under gate 3, needing 0.86. Escape-time forms also need
+far more march steps than mirror geometry — the Mandelbox starter ships at 768 steps with a hit
+epsilon of 6e-5, and it renders as noise at anything much coarser.
+
+**The camera gets folded here too.** A scale-2 Mandelbox has a bounding radius near 14-20, not 6.
+At distance 7 you are inside it and every pixel reads as surface.
+
 ### A trap worth naming once
 
 **The camera gets folded too.** It cost three bad renders. If a starter looks like an empty
