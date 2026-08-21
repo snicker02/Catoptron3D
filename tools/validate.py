@@ -24,18 +24,21 @@ import numpy as np
 import moderngl
 
 # must match state.stepScale in main.js
-DEFAULT_STEP_SCALE = 0.9
+DEFAULT_STEP_SCALE = 0.85
 
 # Two effects mean a correct op can still measure slightly above 1.0, and both are paid for by
 # the same margin (1 - DEFAULT_STEP_SCALE = 10%):
 #   FD_TOL     finite-difference noise — anything under this is indistinguishable from exact.
-#   MARGIN_TOL float32 precision. Ops that round-trip through atan -> sin/cos (the angular
+#   MARGIN_TOL float32 precision. Deliberately NOT tied to DEFAULT_STEP_SCALE: this is a
+#              measurement-precision allowance, while the step scale absorbs first-order DE
+#              error. Coupling them would silently loosen gate 2 every time the step scale
+#              dropped, which is exactly backwards. Ops that round-trip through atan -> sin/cos (the angular
 #              folds) lose ~4% of distance accuracy at some angles. Verified against a float64
 #              reference: the sector fold is isometric to 3e-9 in double, ~1.04 in float32. So
 #              this band is the GPU's precision floor, not a bug — but it is real, and the
 #              marcher must have headroom for it.
 FD_TOL     = 1.02
-MARGIN_TOL = 1.0 + (1.0 - DEFAULT_STEP_SCALE)
+MARGIN_TOL = 1.10
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DUMP = json.load(open(os.path.join(HERE, 'dump.json')))
@@ -270,6 +273,7 @@ def gate_de():
         va = quad(prog)
         for u, val in (('uPrimSize', 0.9), ('uPrimRound', 0.06), ('uPrimAux', 0.35),
                        ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002),
+                       ('uBailout', 6.0),
                        ('uCityStreet', 0.28), ('uCityHeight', 0.9), ('uCityVar', 0.7),
                        ('uCityDetail', 0.0), ('uSun', 0.0), ('uHaze', 0.0)):
             if u in prog: prog[u].value = val
