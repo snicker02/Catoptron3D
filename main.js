@@ -11,6 +11,7 @@ import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
 import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
+import { renderMarkdown } from './engine/markdown.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -18,6 +19,7 @@ console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 const DARK  = [[.045, .055, .075], [.012, .014, .020]];
 const DAY   = [[.58, .72, .92],     [.86, .90, .95]];
 const CLAY  = [[.80, .86, .94],     [.94, .95, .96]];
+const LIT   = [[.16, .24, .38],     [.04, .06, .10]];
 
 const PALETTES = [
   { name: 'Mirror dimension', a: [.42, .44, .52], b: [.38, .36, .44], c: [1, 1, 1],    d: [.62, .70, .82], bg: DARK },
@@ -27,7 +29,8 @@ const PALETTES = [
   { name: 'Spectral',         a: [.50, .50, .50], b: [.50, .50, .50], c: [1, 1, 1],    d: [0, .33, .67],   bg: DARK },
   { name: 'Bone',             a: [.62, .60, .56], b: [.32, .32, .30], c: [1, 1, 1],    d: [.30, .32, .35], bg: DARK },
   { name: 'Clay white',       a: [.84, .84, .85], b: [.11, .11, .12], c: [1, 1, 1],    d: [.20, .24, .28], bg: CLAY },
-  { name: 'Daylight city',    a: [.58, .59, .61], b: [.26, .25, .24], c: [1, 1, 1],    d: [.45, .48, .54], bg: DAY }
+  { name: 'Daylight city',    a: [.58, .59, .61], b: [.26, .25, .24], c: [1, 1, 1],    d: [.45, .48, .54], bg: DAY },
+  { name: 'Glacier glass',    a: [.40, .50, .60], b: [.30, .34, .38], c: [1, 1, 1],    d: [.55, .60, .68], bg: LIT }
 ];
 
 /* ── state — flat and serialisable ─────────────────────────────────────────────────────── */
@@ -44,6 +47,7 @@ const state = {
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
+  transp: 0.0, ior: 1.48, absorb: 0.6, disp: 0.0,
   // colour
   seamSurf: 0,
   seed: 1337,
@@ -183,6 +187,8 @@ function currentCfg(){
     shadow: state.shadow > 0.001,
     glow:   state.glow > 0.001,
     seamSurf: state.seamSurf > 0.5,
+    transp: state.transp > 0.005 && state.bounces > 0,
+    disp:   state.transp > 0.005 && state.bounces > 0 && state.disp > 0.005,
     feedback: Math.round(state.feedback),
     env:      imgReady && state.envAmt > 0.001,
     tex:      imgReady && state.texAmt > 0.001,
@@ -267,6 +273,10 @@ function renderScene(w, h){
   u1(L, 'uReflect', state.reflect);
   u1(L, 'uFresnel', state.fresnel);
   u1(L, 'uMetal', state.metal);
+  u1(L, 'uTransp', state.transp);
+  u1(L, 'uIOR', state.ior);
+  u1(L, 'uAbsorb', state.absorb);
+  u1(L, 'uDisp', state.disp);
   u1(L, 'uRim', state.rim);
   u1(L, 'uFog', state.fog);
 
@@ -400,6 +410,18 @@ const STARTERS = {
            palette: 2, trapScale: 0.9, trapShift: 0.10, sat: 1.0, exposure: 1.6,
            renderScale: 0.7 }
   },
+  'Crystal glass': {
+    stack: [{ t: 8, p: [0.0] }],
+    set: { iters: 3, ifsScale: 0.8, ifsCx: 0, ifsCy: 0, ifsCz: 0, prim: 6, primStyle: 0,
+           steps: 256, stepScale: 0.85, eps: 0.00035, seed: 1337,
+           xShards: 10, xFacets: 6, xLen: 1.0, xRad: 0.035, xTip: 1.25, xSpread: 0.75, xVary: 0.85,
+           bounces: 4, reflect: 0.55, fresnel: 0.9, metal: 0,
+           transp: 0.95, ior: 1.48, absorb: 1.2, disp: 0.0,
+           ao: 1.0, fog: 0.05, haze: 0, sun: 0, ambient: 0.16, spec: 1.4, rim: 1.6,
+           glow: 1.4, camDist: 2.8, fov: 1.2, camAzim: 0.9, camElev: 0.20,
+           palette: 8, trapScale: 0.9, trapShift: 0.10, sat: 1.0, exposure: 1.6,
+           renderScale: 0.55 }
+  },
   'Crystal field': {
     stack: [{ t: 11, p: [2.6, 2.6, 2.6] }],
     set: { iters: 1, ifsScale: 1.0, prim: 6, primStyle: 0,
@@ -465,6 +487,7 @@ const STARTERS = {
 };
 
 const STARTER_RESET = { primStyle: 0, primThick: 0.03, seed: 1337,
+                        transp: 0, ior: 1.48, absorb: 0.6, disp: 0,
                         xShards: 9, xFacets: 6, xLen: 1.3, xRad: 0.045, xTip: 1.15,
                         xSpread: 1.0, xVary: 0.85, feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
                         primRound: 0.06, primAux: 0.35, juliaCx: 0, juliaCy: 0, juliaCz: 0, seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
@@ -484,9 +507,145 @@ function applyStarter(name){
   rebuildGlobals();
   const nb = $('presetName');
   if(nb && !nb.value) nb.value = name;
+  pushHistory();
   setStat('loaded \u201c' + name + '\u201d');
 }
 
+
+
+/* ── top bar ───────────────────────────────────────────────────────────────────────────────
+   New / pause / undo / redo / panels / fullscreen / help / theme, mirroring the 2D tool.      */
+
+let paused = false;
+let panelsHidden = false;
+
+/* undo / redo.
+   History entries are captured presets, which is the same pure snapshot the preset system
+   already produces — so undo cannot drift from what a save would record. One entry per GESTURE
+   rather than per frame: sliders push on `change` (pointer released), not on `input`. */
+let hist = [], histAt = -1;
+let histLast = '';
+
+function pushHistory(){
+  const snap = JSON.stringify(capture(state, DEFAULT_STATE, OPS));
+  if(snap === histLast) return;
+  histLast = snap;
+  hist = hist.slice(0, histAt + 1);
+  hist.push(snap);
+  if(hist.length > 80) hist.shift();
+  histAt = hist.length - 1;
+  syncHistButtons();
+}
+
+function stepHistory(dir){
+  const n = histAt + dir;
+  if(n < 0 || n >= hist.length) return;
+  histAt = n;
+  histLast = hist[n];
+  loadPreset(JSON.parse(hist[n]));
+  syncHistButtons();
+  setStat(dir < 0 ? 'undo' : 'redo');
+}
+
+function syncHistButtons(){
+  const u = $('undoBtn'), r = $('redoBtn');
+  if(u) u.disabled = histAt <= 0;
+  if(r) r.disabled = histAt >= hist.length - 1;
+}
+
+function newProject(){
+  if(!confirm('Start from defaults? This clears the current look.')) return;
+  Object.keys(DEFAULT_STATE).forEach(k => { if(k !== 'stack') state[k] = DEFAULT_STATE[k]; });
+  state.stack = [newSlot(8), newSlot(5)];
+  state.stack[0].p = [0.42];
+  state.stack[1].p = [1.0];
+  const nb = $('presetName'); if(nb) nb.value = '';
+  history.replaceState(null, '', location.pathname);
+  renderStack(); rebuildGlobals(); relayout(); pushHistory();
+  setStat('new project');
+}
+
+function setPaused(v){
+  paused = v;
+  $('pauseBtn').classList.toggle('on', paused);
+  $('pauseBtn').innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
+}
+
+function setPanels(hidden){
+  panelsHidden = hidden;
+  $('panel').classList.toggle('hidden', hidden);
+  $('panelR').classList.toggle('hidden', hidden);
+  $('panelsBtn').classList.toggle('on', hidden);
+  relayout();
+}
+
+function setTheme(name){
+  document.body.classList.remove('theme-grey', 'theme-light');
+  if(name !== 'dark') document.body.classList.add('theme-' + name);
+  try { localStorage.setItem('catoptron3d.theme', name); } catch(e){}
+}
+
+/* Help shows README.md itself rather than a second copy that would drift out of date. */
+let helpLoaded = false;
+async function toggleHelp(force){
+  const el = $('help');
+  const show = force !== undefined ? force : !el.classList.contains('show');
+  el.classList.toggle('show', show);
+  $('helpClose').style.display = show ? '' : 'none';
+  $('helpBtn').classList.toggle('on', show);
+  if(show && !helpLoaded){
+    helpLoaded = true;
+    $('helpDoc').innerHTML = '<p>loading README\u2026</p>';
+    try {
+      const r = await fetch('./README.md', { cache: 'no-cache' });
+      if(!r.ok) throw new Error(r.status);
+      $('helpDoc').innerHTML = renderMarkdown(await r.text());
+    } catch(e){
+      helpLoaded = false;
+      $('helpDoc').innerHTML = '<h2>Guide unavailable</h2><p>README.md could not be loaded ' +
+        '(' + String(e.message || e) + '). Serving the folder over http rather than opening ' +
+        'the file directly will fix it \u2014 ES modules need that anyway.</p>';
+    }
+  }
+  if(show) el.scrollTop = 0;
+}
+
+function wireTopBar(){
+  $('newBtn').onclick    = newProject;
+  $('pauseBtn').onclick  = () => setPaused(!paused);
+  $('undoBtn').onclick   = () => stepHistory(-1);
+  $('redoBtn').onclick   = () => stepHistory(1);
+  $('panelsBtn').onclick = () => setPanels(!panelsHidden);
+  $('helpBtn').onclick   = () => toggleHelp();
+  $('helpClose').onclick = () => toggleHelp(false);
+  $('fsBtn').onclick     = () => {
+    if(document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.();
+  };
+  let theme = 'dark';
+  try { theme = localStorage.getItem('catoptron3d.theme') || 'dark'; } catch(e){}
+  $('themeSel').value = theme;
+  setTheme(theme);
+  $('themeSel').onchange = e => setTheme(e.target.value);
+
+  // one history entry per gesture: `change` fires when a slider is released
+  ['panel', 'panelR'].forEach(id => {
+    $(id).addEventListener('change', pushHistory);
+    $(id).addEventListener('pointerup', () => setTimeout(pushHistory, 0));
+  });
+
+  addEventListener('keydown', e => {
+    if(/input|select|textarea/i.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); stepHistory(e.shiftKey ? 1 : -1); return; }
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+    if(k === ' '){ e.preventDefault(); setPaused(!paused); }
+    else if(k === 'h'){ e.preventDefault(); setPanels(!panelsHidden); }
+    else if(k === 'f'){ e.preventDefault(); $('fsBtn').click(); }
+    else if(k === '?' || (k === '/' && e.shiftKey)){ e.preventDefault(); toggleHelp(); }
+    else if(k === 'escape'){ toggleHelp(false); }
+  });
+}
 
 /* ── presets ───────────────────────────────────────────────────────────────────────────────
    Storage and UI only; the format lives in engine/preset.js and is tested headlessly by
@@ -586,6 +745,7 @@ function importPresetFile(file){
       const p = JSON.parse(rd.result);
       loadPreset(p);
       if(p.name) $('presetName').value = p.name;
+      pushHistory();
     } catch(e){
       console.error(e);
       setStat('not a valid preset file');
@@ -773,9 +933,13 @@ function buildGlobals(){
   g0.append(mkSlider('Reflectivity', 0, 1, 0.01, state.reflect, v => { state.reflect = v; }, 2));
   g0.append(mkSlider('Fresnel edge', 0, 1, 0.01, state.fresnel, v => { state.fresnel = v; }, 2));
   g0.append(mkSlider('Metal tint', 0, 1, 0.01, state.metal, v => { state.metal = v; }, 2));
+  g0.append(mkSlider('Transparency', 0, 1, 0.01, state.transp, v => { state.transp = v; }, 2));
+  g0.append(mkSlider('Refractive index', 1.0, 2.6, 0.005, state.ior, v => { state.ior = v; }, 3));
+  g0.append(mkSlider('Absorption', 0, 6, 0.02, state.absorb, v => { state.absorb = v; }, 2));
+  g0.append(mkSlider('Dispersion', 0, 1, 0.01, state.disp, v => { state.disp = v; }, 2));
   const rn = document.createElement('p');
   rn.className = 'note';
-  rn.textContent = 'Needs bounces > 0. 0.85 is a strong mirror; 1.00 with Fresnel 0 is perfect. '
+  rn.textContent = 'Reflection and transparency both need bounces > 0. Dispersion traces three paths.  0.85 is a strong mirror; 1.00 with Fresnel 0 is perfect. '
     + 'Enclosed mirror rooms blow out at high values \u2014 drop Exposure to compensate.';
   g0.append(rn);
   hostR.append(g0);
@@ -822,7 +986,7 @@ function buildPanel(){
     const n = $('presetList').value;
     if(!n) return;
     const all = lsRead();
-    if(all[n]){ loadPreset(all[n]); $('presetName').value = n; }
+    if(all[n]){ loadPreset(all[n]); $('presetName').value = n; pushHistory(); }
   };
   $('presetDelete').onclick = deletePreset;
   $('presetExport').onclick = exportPreset;
@@ -909,12 +1073,13 @@ function syncSliderDisplay(){ /* sliders are one-way; camera keys/wheel don't wr
 let W = 0, H = 0, animTime = 0, lastT = 0, fpsArr = [];
 
 function frame(now){
-  const dt = Math.min((now - lastT) / 1000, 0.05) || 0.016;
+  const dt0 = Math.min((now - lastT) / 1000, 0.05) || 0.016;
   lastT = now;
+  const dt = paused ? 0 : dt0;
   animTime += dt;
   fpsArr.push(1 / dt); if(fpsArr.length > 40) fpsArr.shift();
 
-  navStep(dt);
+  navStep(dt0);                       // navigation still works while paused
   state.camAzim += state.autoSpin * dt;
 
   syncProgram(now);
@@ -930,6 +1095,7 @@ function frame(now){
     cv.style.width = dw + 'px';
     cv.style.height = dh + 'px';
     cv.style.left = (padL + (availW || innerWidth) * 0.5) + 'px';
+    cv.style.top  = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
   }
 
   renderScene(W, H);
@@ -1011,6 +1177,8 @@ const ASPECTS = [
    and at 1024px reserving both would leave a 424px slot to work in.                           */
 let padL = 0, availW = 0;
 
+const TOPBAR = 44;
+
 function relayout(){
   const wide = innerWidth >= 1180;
   const lOpen = !$('panel').classList.contains('hidden');
@@ -1024,6 +1192,7 @@ function relayout(){
   const hud = $('hud'), boot = $('boot');
   if(hud) hud.style.left = (padL + 12) + 'px';
   if(boot) boot.style.left = (padL + availW * 0.5) + 'px';
+  if(boot) boot.style.top = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
   W = 0; H = 0;                       // force the frame loop to resize
 }
 
@@ -1038,10 +1207,11 @@ function aspectRatio(){
 // CSS pixel size of the canvas for the current aspect, fitted inside the window.
 function displaySize(){
   const aw = availW || innerWidth;
+  const ah = Math.max(80, innerHeight - TOPBAR);
   const ar = aspectRatio();
-  if(!ar) return [aw, innerHeight];
+  if(!ar) return [aw, ah];
   let w = aw, h = w / ar;
-  if(h > innerHeight){ h = innerHeight; w = h * ar; }
+  if(h > ah){ h = ah; w = h * ar; }
   return [Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h))];
 }
 
@@ -1163,6 +1333,7 @@ function savePNG(){
 
 /* ── boot ──────────────────────────────────────────────────────────────────────────────── */
 buildPanel();
+wireTopBar();
 relayout();
 // A starting stack that shows what the tool is for: octahedral mirror planes plus a box fold,
 // recursed. Both are exact isometries, so this is a mathematically clean first image.
@@ -1172,4 +1343,5 @@ if(!loadFromHash()){
   state.stack[1].p = [1.0];
   renderStack();
 }
+pushHistory();
 requestAnimationFrame(frame);
