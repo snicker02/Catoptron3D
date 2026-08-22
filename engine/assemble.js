@@ -83,6 +83,8 @@ export function normalizeCfg(cfg){
     glow:   !!cfg.glow,
     seamSurf: !!cfg.seamSurf,
     primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
+    transp:   !!cfg.transp,
+    disp:     !!cfg.disp,
     feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
     tex:      !!cfg.tex,
@@ -100,7 +102,7 @@ export function signature(cfg){
   }).join(',');
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
-          c.bounces, ops].join('|');
+          c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces, ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -247,17 +249,20 @@ float softShadow(vec3 p, vec3 l){
 // march returns hit distance, or -1.0 on miss. glowAcc is a cheap proximity accumulator:
 // rays that graze the surface without hitting pick up light, which is what makes fold seams
 // and fractal filigree read as emissive rather than as noise.
-float march(vec3 ro, vec3 rd, out float glowAcc){
+// The side argument is +1 outside the solid and -1 inside it. Negating the estimate lets the same routine
+// walk the INTERIOR until it reaches the surface again, which is what refraction requires: a
+// transmitted ray has to be tracked through the medium, not just bent at the entry face.
+float march(vec3 ro, vec3 rd, float side, out float glowAcc){
   float t = uMinDist;
   glowAcc = 0.0;
   for(int i = 0; i < ${cfg.steps}; i++){
     vec3 p = ro + rd * t;
     vec4 tr;
     float safe;
-    float d = mapT(p, tr, safe);
+    float d = side * mapT(p, tr, safe);
     if(d < uEps * t) return t;                 // hit test: TRUE distance only
     ${cfg.glow ? 'glowAcc += 1.0 / (1.0 + d * d * 340.0);' : ''}
-    t += max(safe * uStepScale, uEps * t);     // advance: clamped by any seam
+    t += max(side * safe * uStepScale, uEps * t);
     if(t > uMaxDist) break;
   }
   return -1.0;
@@ -318,6 +323,80 @@ ${cfg.tex ? `
   return col;
 }
 
+// One light path. Pulled out of main() so that dispersion can run it three times with a
+// different IOR per channel — the physically real cause of the rainbow fringing in glass.
+vec3 tracePath(vec3 ro, vec3 rd, float ior, out float glowTot){
+  vec3 accum = vec3(0.0);
+  vec3 atten = vec3(1.0);
+  float side = 1.0;                    // +1 travelling outside the solid, -1 inside it
+  glowTot = 0.0;
+
+  for(int b = 0; b < ${cfg.bounces + 1}; b++){
+    float ga = 0.0;
+    float t = march(ro, rd, side, ga);
+    glowTot += ga * (b == 0 ? 1.0 : 0.55);
+
+    if(t < 0.0){ accum += atten * background(rd); break; }
+
+    vec3 p = ro + rd * t;
+    vec3 gn = calcNormal(p, t);
+    vec3 n  = gn * side;               // always faces the incoming ray
+    vec4 trap;
+    float safeIgn;
+    mapT(p, trap, safeIgn);
+
+    vec3 base;
+    vec3 c = shadeSurface(p, n, rd, trap, base);
+    c = aerial(c, rd, t);
+${cfg.transp ? `
+    // Beer-Lambert: light that crossed the medium is absorbed in proportion to path length,
+    // and in the COMPLEMENT of the material colour — that is what makes thick glass saturate
+    // toward its own hue instead of merely getting darker.
+    if(side < 0.0){
+      vec3 tint = base / max(max(base.r, base.g), max(base.b, 1e-4));
+      atten *= exp(-uAbsorb * t * (vec3(1.0) - tint));
+    }` : ''}
+
+    float ct = clamp(dot(n, -rd), 0.0, 1.0);
+    float F0 = clamp(uReflect, 0.0, 1.0);
+    float F  = (F0 + (1.0 - F0) * uFresnel * pow(1.0 - ct, 5.0)) * (1.0 - clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0));
+${cfg.transp ? `
+    // Opaque fraction shades normally; the rest is carried through the interface.
+    accum += atten * c * (1.0 - uTransp);
+    vec3 thru = atten * uTransp;
+
+    // The reflected share is approximated with the environment rather than traced. Tracing both
+    // branches at every interface is exponential; refraction is the one that has to be followed
+    // exactly, because it is what carries the image through the glass.
+    accum += thru * F * background(reflect(rd, n));
+
+    if(b == ${cfg.bounces}){ accum += thru * (1.0 - F) * background(rd); break; }
+
+    atten = thru * (1.0 - F);
+    float eta = (side > 0.0) ? (1.0 / max(ior, 1.0001)) : max(ior, 1.0001);
+    vec3 rr = refract(rd, n, eta);
+    if(dot(rr, rr) < 1e-8){
+      rd = reflect(rd, n);             // total internal reflection: stay on this side
+    } else {
+      rd = rr;
+      side = -side;                    // crossed the boundary
+    }
+    ro = p + rd * max(uEps * t, 1e-5) * 6.0;
+    if(max(atten.r, max(atten.g, atten.b)) < 0.004) break;` :
+cfg.bounces > 0 ? `
+    if(b == ${cfg.bounces}){ accum += atten * c; break; }
+    accum += atten * c * (1.0 - F);
+    vec3 tint = base / max(max(base.r, base.g), max(base.b, 1e-4));
+    atten *= F * mix(vec3(1.0), tint, uMetal);
+    if(max(atten.r, max(atten.g, atten.b)) < 0.004) break;
+    ro = p + n * max(uEps * t, 1e-5) * 6.0;
+    rd = reflect(rd, n);` : `
+    accum += atten * c;
+    break;`}
+  }
+  return accum;
+}
+
 void main(){
   vec2 uv = (gl_FragCoord.xy - uRes * 0.5) / uRes.y;
 
@@ -328,56 +407,21 @@ void main(){
   vec3 upv = cross(rgt, fwd);
   vec3 rd = normalize(rgt * uv.x + upv * uv.y + fwd * uFov);
 
-  // Specular bounce loop. Folding space makes mirror GEOMETRY; this makes the surfaces
-  // actually mirror EACH OTHER, which is the other half of a hall of mirrors. Bounce count is
-  // a compile-time literal, so 0 bounces emits a single march and costs nothing.
-  vec3 accum = vec3(0.0);
-  vec3 atten = vec3(1.0);
   float glowTot = 0.0;
+  vec3 col;
+${cfg.disp ? `
+  // Dispersion: three separate paths, one per channel, with the IOR spread around uIOR.
+  // Three full traces is the honest cost of the effect; there is no cheap version that bends
+  // the channels differently without actually following them.
+  col = vec3(0.0);
+  for(int ch = 0; ch < 3; ch++){
+    float g;
+    float iorCh = uIOR + (float(ch) - 1.0) * uDisp * 0.06;
+    col[ch] = tracePath(ro, rd, iorCh, g)[ch];
+    glowTot = max(glowTot, g);
+  }` : `
+  col = tracePath(ro, rd, uIOR, glowTot);`}
 
-  for(int b = 0; b < ${cfg.bounces + 1}; b++){
-    float ga = 0.0;
-    float t = march(ro, rd, ga);
-    glowTot += ga * (b == 0 ? 1.0 : 0.55);
-
-    if(t < 0.0){ accum += atten * background(rd); break; }
-
-    vec3 p = ro + rd * t;
-    vec3 n = calcNormal(p, t);
-    vec4 trap;
-    float safeIgn;
-    mapT(p, trap, safeIgn);
-
-    vec3 base;
-    vec3 c = shadeSurface(p, n, rd, trap, base);
-    float fg = clamp(1.0 - exp(-uFog * t * t * 0.01), 0.0, 1.0);
-    c = aerial(c, rd, t);
-${cfg.bounces > 0 ? `
-    // Schlick, with the BASE reflectance as the control rather than a hardcoded constant.
-    //
-    // This used to read uReflect * mix(0.18, 1.0, pow(...)), which capped head-on reflection at
-    // 18% of the slider — full value only appeared at grazing angles. A real mirror is ~95% at
-    // every angle. Now Reflectivity IS F0, and Fresnel separately controls how much the grazing
-    // angle lifts it toward 1: Fresnel 0 is a flat metal mirror, 1 is glassy edge-heavy falloff.
-    float ct = clamp(dot(n, -rd), 0.0, 1.0);
-    float F0 = clamp(uReflect, 0.0, 1.0);
-    float F  = (F0 + (1.0 - F0) * uFresnel * pow(1.0 - ct, 5.0)) * (1.0 - fg);
-    if(b == ${cfg.bounces}){ accum += atten * c; break; }
-    accum += atten * c * (1.0 - F);
-    // Metals tint what they reflect; dielectrics don't. The tint is NORMALISED so the brightest
-    // channel stays at 1 — multiplying by a shaded colour each bounce crushed everything to
-    // black by the third one. This carries hue without costing energy, which is what makes gold
-    // read as gold through a stack of bounces instead of as a dark smear.
-    vec3 tint = base / max(max(base.r, base.g), max(base.b, 1e-4));
-    atten *= F * mix(vec3(1.0), tint, uMetal);
-    if(max(atten.r, max(atten.g, atten.b)) < 0.004) break;
-    ro = p + n * max(uEps * t, 1e-5) * 6.0;
-    rd = reflect(rd, n);` : `
-    accum += atten * c;
-    break;`}
-  }
-
-  vec3 col = accum;
   ${cfg.glow ? 'col += palette(clamp(glowTot * 0.03 + uTrapShift, 0.0, 1.0)) * glowTot * uGlow * 0.02;' : ''}
 
   col *= uExposure;
