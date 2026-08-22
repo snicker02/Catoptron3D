@@ -131,6 +131,129 @@ float bisectDist(vec3 p, vec3 c1, vec3 c2){
   return abs(dot(p - 0.5 * (c1 + c2), d / L));
 }` },
 
+  // ── frames ──
+  // A "frame" keeps only the edges of a solid. There is no universal formula for it — edges are
+  // a feature of the specific shape — so each one is written by hand. Shell (abs(d) - t) IS
+  // universal and is applied by the assembler instead, for primitives with no natural edges.
+
+  sdBoxFrame3: { deps: [], src: `
+// Edge bars of an arbitrary box: three axis-aligned bars, unioned.
+float sdBoxFrame3(vec3 p, vec3 b, float e){
+  vec3 q = abs(p) - b;
+  vec3 w = abs(vec3(q.x + e, q.y + e, q.z + e)) - e;
+  float a1 = length(max(vec3(q.x, w.y, w.z), 0.0)) + min(max(q.x, max(w.y, w.z)), 0.0);
+  float a2 = length(max(vec3(w.x, q.y, w.z), 0.0)) + min(max(w.x, max(q.y, w.z)), 0.0);
+  float a3 = length(max(vec3(w.x, w.y, q.z), 0.0)) + min(max(w.x, max(w.y, q.z)), 0.0);
+  return min(a1, min(a2, a3));
+}` },
+
+  sdBoxFrame: { deps: ['sdBoxFrame3'], src: `
+float sdBoxFrame(vec3 p){
+  return sdBoxFrame3(p, vec3(uPrimSize), max(uPrimThick, 1e-4));
+}` },
+
+  sdSeg: { deps: [], src: `
+float sdSeg(vec3 p, vec3 a, vec3 b){
+  vec3 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-9), 0.0, 1.0);
+  return length(pa - ba * h);
+}` },
+
+  sdOctaFrame: { deps: ['sdSeg'], src: `
+// Octahedron edges, EXACTLY: distance to three line segments in the folded octant.
+//
+// A first version combined (distance to the face plane) and (distance to the nearest coordinate
+// plane) as a 2D hypotenuse. That reads plausibly and is wrong — gate 3 measured it overshooting
+// by 18.7%, because the two measures are not orthogonal. abs() folding is a reflection and the
+// edge set is symmetric under it, so folding to the positive octant and measuring the three
+// segments that bound its face gives the true distance to all twelve edges.
+float sdOctaFrame(vec3 p){
+  vec3 q = abs(p);
+  float S = uPrimSize;
+  float d = sdSeg(q, vec3(S, 0.0, 0.0), vec3(0.0, S, 0.0));
+  d = min(d, sdSeg(q, vec3(0.0, S, 0.0), vec3(0.0, 0.0, S)));
+  d = min(d, sdSeg(q, vec3(0.0, 0.0, S), vec3(S, 0.0, 0.0)));
+  return d - max(uPrimThick, 1e-4);
+}` },
+
+  sdSphereFrame: { deps: [], src: `
+// Latitude / longitude wireframe. A sphere has no edges, so its frame is a grid on the surface:
+// arc distance to the nearest grid line, combined with radial distance to the shell.
+float sdSphereFrame(vec3 p){
+  float R = uPrimSize;
+  float r = max(length(p), 1e-5);
+  vec3 n = p / r;
+  float lat = asin(clamp(n.y, -1.0, 1.0));
+  float lon = atan(n.z, n.x);
+  float N = max(floor(uPrimAux * 24.0 + 0.5), 2.0);
+  float dLat = abs(fract(lat * N / PI + 0.5) - 0.5) * (PI / N) * R;
+  float cl = max(cos(lat), 1e-3);
+  float dLon = abs(fract(lon * N / TAU + 0.5) - 0.5) * (TAU / N) * R * cl;
+  return length(vec2(min(dLat, dLon), r - R)) - max(uPrimThick, 1e-4);
+}` },
+
+  sdTorusFrame: { deps: [], src: `
+// Torus wireframe: meridian circles around the tube plus rail circles along it.
+//
+// Each wire is a genuine circle, so its distance is computed exactly rather than as a 2D
+// hypotenuse of angular and radial terms — that approximation overshot by 64% under gate 3.
+// The folded angle is evaluated at BOTH neighbouring wires, since rounding to the nearest one
+// can miss the truly nearest and an overestimate is the unsafe direction.
+float sdTorusFrame(vec3 p){
+  float R = uPrimSize, r = max(uPrimAux, 1e-4);
+  float N = max(floor(uPrimRound * 60.0 + 0.5), 3.0);
+  float seg = TAU / N;
+  float rad = length(vec2(p.x, p.z));
+  float d = 1e9;
+
+  // meridians: circles of radius r in a plane through the y axis
+  float a = atan(p.z, p.x) / seg;
+  for(int i = 0; i < 2; i++){
+    float ak = (floor(a) + float(i)) * seg;
+    vec3 u = vec3(cos(ak), 0.0, sin(ak));
+    float x = dot(p, u);
+    float w = p.x * -sin(ak) + p.z * cos(ak);
+    d = min(d, length(vec2(length(vec2(x - R, p.y)) - r, w)));
+  }
+  // rails: circles concentric with the torus axis
+  float b = atan(p.y, rad - R) / seg;
+  for(int i = 0; i < 2; i++){
+    float bk = (floor(b) + float(i)) * seg;
+    float Rk = R + r * cos(bk);
+    float yk = r * sin(bk);
+    d = min(d, length(vec2(rad - Rk, p.y - yk)));
+  }
+  return d - max(uPrimThick, 1e-4);
+}` },
+
+  // City with every building rendered as a frame instead of a solid — the reference look.
+  sdCityFrame: { deps: ['hash13', 'sdBox3', 'sdBoxFrame3'], src: `
+float cityBlockF(vec2 id, vec3 p, float cell, float hw){
+  float r1 = hash13(vec3(id, 1.7));
+  float r2 = hash13(vec3(id.x + 3.7, id.y + 5.1, 2.3));
+  float h  = uCityHeight * mix(1.0, r1, uCityVar) + 0.06;
+  if(r2 < 0.13) return 1e9;
+  vec2 c = (id + 0.5) * cell;
+  vec3 lp = vec3(p.x - c.x, p.y - h * 0.5, p.z - c.y);
+  return sdBoxFrame3(lp, vec3(hw, h * 0.5, hw), max(uPrimThick, 1e-3));
+}
+float sdCityFrame(vec3 p){
+  float cell = max(uPrimSize, 0.06);
+  float street = clamp(uCityStreet, 0.02, 0.92) * cell;
+  float hw = (cell - street) * 0.5;
+  float ground = p.y;
+  if(hw < 0.008) return ground;
+  vec2 g  = vec2(p.x, p.z) / cell;
+  vec2 id = floor(g);
+  float d = 1e9;
+  for(int j = -1; j <= 1; j++){
+    for(int i = -1; i <= 1; i++){
+      d = min(d, cityBlockF(id + vec2(float(i), float(j)), p, cell, hw));
+    }
+  }
+  return min(ground, d);
+}` },
+
   // ── colour ──
   palette: { deps: [], src: `
 vec3 palette(float t){ return uPal0 + uPal1 * cos(TAU * (uPal2 * t + uPal3)); }` }
