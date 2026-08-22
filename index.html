@@ -296,6 +296,20 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
   </div>
 
   <div class="group">
+    <h2>Flame import</h2>
+    <div class="row">
+      <button id="flameBtn">import .flame</button>
+      <button id="flameClear">clear</button>
+    </div>
+    <div id="flameName" class="note">no flame imported</div>
+    <input type="file" id="flameFile" accept=".flame,application/xml,text/xml" hidden>
+    <p class="note">JWildfire / Apophysis, <b>linear xforms only</b>. A flame renders by chaos
+    game, which a distance estimator cannot do — but a contractive affine IFS can be run
+    backwards, which is exactly what the Flame IFS fold does. Nonlinear variations are skipped
+    and listed in the console.</p>
+  </div>
+
+  <div class="group">
     <h2>Presets</h2>
     <input type="text" id="presetName" class="tin" placeholder="preset name" aria-label="Preset name">
     <div class="row" style="margin-top:5px">
