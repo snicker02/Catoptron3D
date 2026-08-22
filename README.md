@@ -116,6 +116,27 @@ One record in `engine/ops.js`: `name`, `fn` matching the GLSL function name, `li
 
 ---
 
+## Crystal
+
+A cluster of faceted shards radiating from the origin. Each shard is a regular n-gonal prism
+with a pyramidal termination, built as an intersection of half-spaces — which for a convex solid
+is both simple and safe, since `max()` of plane distances underestimates outside the body and an
+underestimate is the harmless direction. The union of shards is exact and each is placed by a
+rotation, so the whole primitive measures 0.00000 under gate 3.
+
+**Point length is `R * tan(tip)`**, so a `Point length` near zero gives a FLAT top and values
+approaching pi/2 give a needle. The intuition runs backwards, and the first version shipped at
+0.55 rad — a point only 0.6x the radius, which read as a beam rather than a crystal.
+
+Directions, lengths and radii are hashed per shard from the global **Seed**, because a perfectly
+symmetric cluster reads as synthetic. For deliberate order, set **Spread** to 0 and put a
+Polyhedral mirror, Sector fold or Octahedral fold in the stack instead — that is the idiomatic
+way to get symmetry in this tool, and it composes with everything else. Domain repeat turns one
+cluster into a field.
+
+Not there yet: the reference footage is translucent, with light carrying through the shards.
+That needs refraction rather than reflection, and is material work rather than geometry.
+
 ## Primitive style: solid, shell, frame
 
 A **Style** control in the Renderer panel applies to every primitive.
