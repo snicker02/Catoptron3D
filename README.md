@@ -116,6 +116,41 @@ One record in `engine/ops.js`: `name`, `fn` matching the GLSL function name, `li
 
 ---
 
+## Primitive style: solid, shell, frame
+
+A **Style** control in the Renderer panel applies to every primitive.
+
+**Shell** (`abs(d) - t`) hollows anything. It is the one hollowing operation that needs no
+per-shape work and is exact for every primitive, because `|grad(|d| - t)| = |grad d| = 1`.
+Note that a closed shell looks identical to a solid from outside — it only reads once you can
+see into it, which folds and frames readily arrange.
+
+**Frame** keeps only the edges, and has no universal formula: edges are a feature of the specific
+shape, so each is written by hand.
+
+| primitive | frame |
+|---|---|
+| Box | the twelve edge bars |
+| Octahedron | exact distance to three edge segments in the folded octant |
+| Sphere | latitude / longitude wireframe (a sphere has no edges, so its frame is a surface grid) |
+| Torus | meridian circles plus rail circles |
+| City | every building as a box frame — the reference look |
+
+Primitives with no frame variant fall back to shell, so the control never does nothing.
+Thickness is shared by both styles.
+
+**Two of these were wrong before gate 3 saw them.** The octahedron frame combined "distance to
+the face plane" and "distance to the nearest coordinate plane" as a 2D hypotenuse — plausible,
+and overshooting by 18.7%, because the two measures are not orthogonal. The torus frame did the
+same with angular and radial terms and overshot by 64%. Both are now computed as true distances
+to the actual wires (segments and circles), and both measure 0.00000. The general lesson:
+**combining two distance-like quantities with `length(vec2(a,b))` is only valid when they are
+orthogonal**, and it is very easy to write something that looks right and renders plausibly
+while quietly breaking the estimator.
+
+The PRIMS order is part of the preset format — `state.prim` is an index — so new primitives are
+appended and existing ones never move.
+
 ## Presets
 
 Three routes out of the tool:
