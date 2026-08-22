@@ -17,14 +17,24 @@ export { VS };
 
 export const MAX_OPS = 8;
 
+// NOTE: the order of this list is part of the preset format (state.prim is an index), so new
+// primitives get APPENDED and existing ones never move.
+// `frame` is an optional edge-only variant; primitives without one fall back to shell.
 export const PRIMS = [
-  { name: 'Box frame', fn: 'sdFrame',  deps: ['sdFrame'] },
-  { name: 'Box',       fn: 'sdBox',    deps: ['sdBox'] },
-  { name: 'Sphere',    fn: 'sdSphere', deps: ['sdSphere'] },
-  { name: 'Octahedron',fn: 'sdOcta',   deps: ['sdOcta'] },
-  { name: 'Torus',     fn: 'sdTorus',  deps: ['sdTorus'] },
-  { name: 'City',      fn: 'sdCity',   deps: ['sdCity'] }
+  { name: 'Box frame', fn: 'sdFrame',  deps: ['sdFrame'], frame: 'sdFrame', frameDeps: ['sdFrame'] },
+  { name: 'Box',       fn: 'sdBox',    deps: ['sdBox'],
+    frame: 'sdBoxFrame', frameDeps: ['sdBoxFrame'] },
+  { name: 'Sphere',    fn: 'sdSphere', deps: ['sdSphere'],
+    frame: 'sdSphereFrame', frameDeps: ['sdSphereFrame'] },
+  { name: 'Octahedron',fn: 'sdOcta',   deps: ['sdOcta'],
+    frame: 'sdOctaFrame', frameDeps: ['sdOctaFrame'] },
+  { name: 'Torus',     fn: 'sdTorus',  deps: ['sdTorus'],
+    frame: 'sdTorusFrame', frameDeps: ['sdTorusFrame'] },
+  { name: 'City',      fn: 'sdCity',   deps: ['sdCity'],
+    frame: 'sdCityFrame', frameDeps: ['sdCityFrame'] }
 ];
+
+export const PRIM_STYLES = ['solid', 'shell (hollow)', 'frame (edges)'];
 
 export const MARCH_STEPS = [64, 96, 128, 192, 256, 384, 512, 768];
 
@@ -71,6 +81,7 @@ export function normalizeCfg(cfg){
     shadow: !!cfg.shadow,
     glow:   !!cfg.glow,
     seamSurf: !!cfg.seamSurf,
+    primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
     feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
     tex:      !!cfg.tex,
@@ -86,7 +97,7 @@ export function signature(cfg){
     const d = discIdx(op).map(i => Math.round(sl.p[i]));
     return sl.type + (d.length ? ':' + d.join('.') : '');
   }).join(',');
-  return [c.prim, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
+  return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
           c.bounces, ops].join('|');
 }
@@ -104,7 +115,13 @@ export function assemble(cfgIn){
   }).join('\n');
 
   // ── helpers: op deps + primitive deps + always-on ──
-  const helperNames = ['rot3', 'palette', ...prim.deps];
+  // frame style uses the edge variant where one exists; everything else falls back to shell,
+  // which is universal and exact
+  const useFrame = cfg.primStyle === 2 && !!prim.frame;
+  const useShell = cfg.primStyle === 1 || (cfg.primStyle === 2 && !prim.frame);
+  const primFn = useFrame ? prim.frame : prim.fn;
+  const helperNames = ['rot3', 'palette',
+                       ...(useFrame ? prim.frameDeps : prim.deps)];
   cfg.stack.forEach(sl => (OPS[sl.type].deps || []).forEach(h => helperNames.push(h)));
   const helperSrc = resolveHelpers(helperNames);
 
@@ -148,7 +165,14 @@ ${helperSrc}
 
 ${opSrc}
 
-float prim(vec3 p){ return ${prim.fn}(p); }
+float prim(vec3 p){
+  float d = ${primFn}(p);
+${useShell ? `  // Shell: the signed distance to the SURFACE of a solid rather than to its interior.
+  // Exact for every primitive — |grad(|d| - t)| = |grad d| = 1 away from the medial axis — so
+  // this is the one hollowing operation that needs no per-shape work.
+  d = abs(d) - max(uPrimThick, 1e-4);` : ''}
+  return d;
+}
 
 // ── the distance estimator ──────────────────────────────────────────────────────────────
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
