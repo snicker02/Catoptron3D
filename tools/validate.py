@@ -19,7 +19,7 @@ sources compiled here are the exact `#version 300 es` strings the browser gets.
 
 Usage:  node tools/dump.mjs > tools/dump.json && python3 tools/validate.py
 """
-import json, os, sys, math
+import json, os, re, sys, math
 import numpy as np
 import moderngl
 
@@ -74,21 +74,24 @@ def gate_compile():
 # ────────────────────────────────────────────────────────────────────────────────────────
 # GATE 2 — Lipschitz / operator norm
 # ────────────────────────────────────────────────────────────────────────────────────────
+# The probe compiles every helper, so it needs every uniform they reference. That list is
+# generated from prelude.js rather than hand-maintained: a hand-copied list silently rots the
+# moment a primitive adds a uniform, and the failure looks like "all operators broken".
+_PRELUDE = open(os.path.join(HERE, '..', 'engine', 'prelude.js')).read()
+_UNIFORMS = "\n".join(
+    "uniform " + m.group(1) + " " + m.group(2) + ";"
+    for m in re.finditer(r'^uniform\s+(\w+)\s+([^;]+);', _PRELUDE, re.M)
+    if 'uPk' not in m.group(2))
+
 PROBE_HEAD = """#version 300 es
 precision highp float;
 out vec4 fragColor;
 #define PI  3.14159265359
 #define TAU 6.28318530718
 #define DEG 0.01745329252
-uniform vec2  uRes;
-uniform float uPrimSize, uPrimRound, uPrimAux, uPrimThick, uSeed, uSpread;
 uniform vec4  uPk0, uPk1;
-uniform vec3  uPal0, uPal1, uPal2, uPal3;
-uniform float uCityStreet, uCityHeight, uCityVar, uCityDetail;
-uniform vec3  uLightDir;
-uniform vec3  uBgTop, uBgBot;
-uniform float uSun, uHaze;
-"""
+uniform float uSpread;
+""" + _UNIFORMS + "\n"
 
 PROBE_TAIL = """
 float rnd(vec2 co, float k){ return fract(sin(dot(co, vec2(12.9898, 78.233)) + k) * 43758.5453); }
@@ -272,7 +275,9 @@ def gate_de():
             FAILED.append(('DE-COMPILE', d['label'], str(e)[:300])); all_ok = False; continue
         va = quad(prog)
         for u, val in (('uPrimSize', 0.9), ('uPrimRound', 0.06), ('uPrimAux', 0.35),
-                       ('uPrimThick', 0.03), ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002),
+                       ('uPrimThick', 0.03), ('uIfsScale', 1.9),
+                       ('uSeed', 1337.0), ('uXShards', 6.0), ('uXFacets', 6.0), ('uXLen', 1.1),
+                       ('uXRad', 0.10), ('uXTip', 0.55), ('uXSpread', 1.0), ('uXVary', 0.8), ('uStepScale', 1.0), ('uEps', 0.002),
                        ('uBailout', 6.0),
                        ('uCityStreet', 0.28), ('uCityHeight', 0.9), ('uCityVar', 0.7),
                        ('uCityDetail', 0.0), ('uSun', 0.0), ('uHaze', 0.0)):
