@@ -12,6 +12,7 @@ import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/as
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
+import { parseFlame } from './engine/flame.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -50,6 +51,7 @@ const state = {
   transp: 0.0, ior: 1.48, absorb: 0.6, disp: 0.0,
   // colour
   seamSurf: 0,
+  flame: null,
   seed: 1337,
   xShards: 9, xFacets: 6, xLen: 1.3, xRad: 0.045, xTip: 1.15, xSpread: 1.0, xVary: 0.85,
   cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
@@ -180,6 +182,7 @@ function currentCfg(){
   return {
     stack:  state.stack.map(sl => ({ type: sl.type, p: sl.p.slice() })),
     prim:   state.prim,
+    flame:  state.flame,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -513,6 +516,54 @@ function applyStarter(name){
 
 
 
+
+/* ── flame import ──────────────────────────────────────────────────────────────────────────
+   A JWildfire .flame renders by chaos game, which a distance estimator cannot do. What it can
+   do is run a contractive affine IFS BACKWARDS. So the LINEAR subset imports exactly and
+   anything carrying a nonlinear variation is reported and skipped rather than approximated.  */
+
+function refreshFlameLabel(){
+  const e = $('flameName');
+  if(!e) return;
+  e.textContent = state.flame
+    ? state.flame.name + ' \u00b7 ' + state.flame.maps.length + ' maps'
+    : 'no flame imported';
+}
+
+function loadFlameText(text, label){
+  try {
+    const f = parseFlame(text);
+    state.flame = f;
+    if(!state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')){
+      const i = OPS.findIndex(o => o.name === 'Flame IFS');
+      state.stack = [newSlot(i)];                 // an imported flame with no fold does nothing
+      state.iters = 10;
+      state.ifsScale = 1.0;
+      state.prim = 2;
+      state.primSize = 0.006;
+      state.eps = 0.00025;
+      state.steps = 256;
+    }
+    renderStack(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+    if(f.warnings.length){
+      console.warn('[catoptron3d] flame import:\n  ' + f.warnings.join('\n  '));
+      setStat(f.maps.length + ' maps \u00b7 ' + f.warnings.length + ' skipped \u2014 see console');
+    } else {
+      setStat('imported ' + label + ' \u00b7 ' + f.maps.length + ' maps');
+    }
+  } catch(e){
+    console.error(e);
+    setStat('flame import failed: ' + e.message);
+  }
+}
+
+function clearFlame(){
+  state.flame = null;
+  state.stack = state.stack.filter(sl => OPS[sl.type].name !== 'Flame IFS');
+  renderStack(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+  setStat('flame cleared');
+}
+
 /* ── top bar ───────────────────────────────────────────────────────────────────────────────
    New / pause / undo / redo / panels / fullscreen / help / theme, mirroring the 2D tool.      */
 
@@ -672,6 +723,8 @@ function loadPreset(p){
   const r = applyPreset(p, DEFAULT_STATE, OPS);
   Object.assign(state, r.state);
   state.stack = r.stack;
+  state.flame = r.flame || null;
+  refreshFlameLabel();
   renderStack();
   rebuildGlobals();
   relayout();
@@ -980,6 +1033,17 @@ function buildPanel(){
   $('imgBtn').onclick = () => $('imgFile').click();
   $('imgClear').onclick = clearImage;
   refreshImgLabel();
+
+  $('flameBtn').onclick   = () => $('flameFile').click();
+  $('flameClear').onclick = clearFlame;
+  $('flameFile').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => loadFlameText(rd.result, f.name);
+    rd.readAsText(f);
+  });
+  refreshFlameLabel();
 
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {
