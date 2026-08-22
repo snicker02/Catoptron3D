@@ -57,6 +57,20 @@ tools/
 
 ## Interface
 
+A top bar and two rails.
+
+**Top bar:** New, pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide panels (H),
+fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
+
+Undo history stores captured **presets** — the same pure snapshot the preset system produces —
+so undo can never drift from what a save would record. One entry per gesture rather than per
+frame: sliders push on release, not while dragging.
+
+The **?** button renders `README.md` itself rather than a separately-maintained copy that would
+go stale, using a small dependency-free Markdown renderer in `engine/markdown.js`. That means
+**README.md has to be deployed alongside index.html** — it is at the repo root, so a normal
+deploy covers it, but a build step that ships only the app would silently break the help panel.
+
 Two rails, split by what they answer:
 
 - **Right — Structure.** What you are building: Fold stack, Renderer (primitive, membrane,
@@ -134,8 +148,33 @@ Polyhedral mirror, Sector fold or Octahedral fold in the stack instead — that 
 way to get symmetry in this tool, and it composes with everything else. Domain repeat turns one
 cluster into a field.
 
-Not there yet: the reference footage is translucent, with light carrying through the shards.
-That needs refraction rather than reflection, and is material work rather than geometry.
+Transparency is in — see below.
+
+## Transparency and refraction
+
+Reflection bounces off a surface; **transmission goes through the medium**, and that needs the
+marcher to walk the interior. `march` takes a side sign: +1 outside, -1 inside, negating the
+estimate so the same routine finds the exit face. The path loop then tracks which side it is on
+and bends at every interface.
+
+- **Transparency** splits each hit: the opaque fraction shades normally, the rest is carried on.
+- **Refractive index** drives Snell at both faces. Total internal reflection is detected (a
+  degenerate `refract` result) and handled by reflecting instead of crossing.
+- **Absorption** is Beer-Lambert over the distance actually travelled inside, and in the
+  COMPLEMENT of the material colour — that is what makes thick glass saturate toward its own hue
+  rather than merely darken.
+- **Dispersion** traces three separate paths with the IOR spread per channel. Three full traces
+  is the honest cost; there is no cheap version that bends the channels differently without
+  following them. Compile-time, so it costs nothing at zero.
+
+Reflection at each interface is approximated with the environment rather than traced, because
+following both branches at every hit is exponential. Refraction is the branch that has to be
+exact, since it is what carries the image through.
+
+**Glass needs something to transmit.** Against a near-black sky, transparency reads as a dark
+smudge — correct physics and a useless picture. The `Glacier glass` palette ships a lit sky for
+this reason, and Glow supplies the internal luminosity that makes a crystal read as lit from
+within. All three of Transparency, Reflectivity and Dispersion need **bounces > 0**.
 
 ## Primitive style: solid, shell, frame
 
