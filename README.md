@@ -211,6 +211,43 @@ while quietly breaking the estimator.
 The PRIMS order is part of the preset format — `state.prim` is an index — so new primitives are
 appended and existing ones never move.
 
+## JWildfire flame import
+
+`import .flame` reads a JWildfire / Apophysis flame and turns it into geometry — the **linear
+subset only**, which is a hard boundary rather than a limitation of effort.
+
+**Why linear only.** A flame renders by CHAOS GAME: push a point forward through randomly chosen
+maps and accumulate a histogram. A distance estimator cannot do that at all. What it can do is
+run a contractive affine IFS BACKWARDS — the attractor satisfies A = union of f_i(A), so a point
+near A lies in some f_i(A) and f_i inverse carries it back. That works for affine maps and only
+for affine maps. An xform carrying any nonlinear variation is skipped and listed in the console,
+never approximated.
+
+**The coordinate convention was reverse-engineered.** JWildfire stores a 3D xform as three 2D
+affines — coefs (XY), yzCoefs (YZ), zxCoefs (ZX) — and the composition order is not in the file.
+It was determined by requiring a known Sierpinski tetrahedron to come out as exact 0.5
+similarities: of the six possible orders, two give singular values [1, 0.5, 0.25] and are
+definitively wrong, and four give exact 0.5-similarities. XY then ZX then YZ is used. The four
+survivors differ only for an xform with non-diagonal blocks in TWO planes at once; for the common
+case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
+import ever comes out visibly wrong.
+
+**Map selection is a heuristic, and it is exposed.** The exact rule would be "the inverse of the
+map whose image contains p", which has no closed form for a general affine IFS. `Select` offers
+*nearest image* (apply every inverse, keep the one landing closest to the origin) and *nearest
+fixed point* (each map contracts toward its own fixed point, so those points partition space).
+Different flames favour different ones; the Sierpinski example is better under nearest-image.
+
+**What it looks like.** An IFS attractor has measure zero, so it renders as a fine dust rather
+than a solid — which is what the set actually is. `Primitive size` thickens it, and wants to
+scale roughly with 2^-iterations because the estimator divides by the accumulated expansion. A
+purpose-built fold (Tetrahedral fold plus a scale) gives a cleaner solid Sierpinski than the
+imported general form; the import earns its place on flames you cannot express as a fold.
+
+Inverse matrices and operator norms are computed in double precision at import time and baked
+into the shader as constants, so the estimator divides by a true operator norm even when a map
+is a shear rather than a similarity. Flames are carried inside presets.
+
 ## Presets
 
 Three routes out of the tool:
