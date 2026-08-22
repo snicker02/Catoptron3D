@@ -10,6 +10,7 @@ import { BUILD } from './engine/prelude.js';
 import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
 import { PRIMS, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
 import { createProgramCache } from './engine/glcache.js';
+import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -56,6 +57,10 @@ const state = {
   renderScale: 0.75,
   stack: []
 };
+
+// Pristine defaults, snapshotted before anything touches state. Presets store only what differs
+// from this and reset to it on load, which is what makes loading deterministic.
+const DEFAULT_STATE = JSON.parse(JSON.stringify(state));
 
 /* ── control schema — drives the panel AND declares ranges ─────────────────────────────── */
 const GROUPS = [
@@ -420,7 +425,144 @@ function applyStarter(name){
   Object.assign(state, st.set);
   renderStack();
   rebuildGlobals();
+  const nb = $('presetName');
+  if(nb && !nb.value) nb.value = name;
   setStat('loaded \u201c' + name + '\u201d');
+}
+
+
+/* ── presets ───────────────────────────────────────────────────────────────────────────────
+   Storage and UI only; the format lives in engine/preset.js and is tested headlessly by
+   tools/test-presets.mjs. Three routes out of the tool:
+     - named slots in localStorage (fast, this machine only)
+     - a .json file (portable, archivable)
+     - a URL hash (a look becomes a link)
+   The loaded image is NOT part of a preset: a photo cannot go in a URL, and silently baking one
+   into a file would make presets unpredictably large. Reload the image after loading a preset. */
+const LS_KEY = 'catoptron3d.presets';
+
+function lsRead(){
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+  catch(e){ return {}; }                       // private mode, quota, corrupt entry — all fine
+}
+function lsWrite(obj){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(obj)); return true; }
+  catch(e){ setStat('could not save \u2014 storage unavailable'); return false; }
+}
+
+function currentPreset(name){ return capture(state, DEFAULT_STATE, OPS, name); }
+
+function loadPreset(p){
+  const r = applyPreset(p, DEFAULT_STATE, OPS);
+  Object.assign(state, r.state);
+  state.stack = r.stack;
+  renderStack();
+  rebuildGlobals();
+  relayout();
+  if(r.warnings.length){
+    console.warn('[catoptron3d] preset loaded with warnings:\n  ' + r.warnings.join('\n  '));
+    setStat('loaded with ' + r.warnings.length + ' warning(s) \u2014 see console');
+  } else {
+    setStat('loaded' + (p.name ? ' \u201c' + p.name + '\u201d' : ''));
+  }
+}
+
+function refreshPresetList(){
+  const sel = $('presetList');
+  if(!sel) return;
+  const all = lsRead();
+  const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = '';
+  if(!names.length){
+    const o = document.createElement('option');
+    o.textContent = '(none saved)'; o.value = '';
+    sel.append(o);
+    return;
+  }
+  names.forEach(n => {
+    const o = document.createElement('option');
+    o.value = n; o.textContent = n;
+    sel.append(o);
+  });
+}
+
+function savePreset(){
+  const name = ($('presetName').value || '').trim();
+  if(!name){ setStat('name the preset first'); return; }
+  const all = lsRead();
+  if(all[name] && !confirm('Overwrite preset \u201c' + name + '\u201d?')) return;
+  all[name] = currentPreset(name);
+  if(lsWrite(all)){
+    refreshPresetList();
+    $('presetList').value = name;
+    setStat('saved \u201c' + name + '\u201d');
+  }
+}
+
+function deletePreset(){
+  const name = $('presetList').value;
+  if(!name) return;
+  if(!confirm('Delete preset \u201c' + name + '\u201d?')) return;
+  const all = lsRead();
+  delete all[name];
+  lsWrite(all);
+  refreshPresetList();
+  setStat('deleted \u201c' + name + '\u201d');
+}
+
+function exportPreset(){
+  const name = ($('presetName').value || 'catoptron3d').trim();
+  const blob = new Blob([JSON.stringify(currentPreset(name), null, 1)],
+                        { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name.replace(/[^\w\-]+/g, '_') + '.json';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function importPresetFile(file){
+  if(!file) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const p = JSON.parse(rd.result);
+      loadPreset(p);
+      if(p.name) $('presetName').value = p.name;
+    } catch(e){
+      console.error(e);
+      setStat('not a valid preset file');
+    }
+  };
+  rd.readAsText(file);
+}
+
+async function copyLink(){
+  const name = ($('presetName').value || '').trim();
+  const hash = encode(currentPreset(name));
+  const url = location.origin + location.pathname + '#p=' + hash;
+  history.replaceState(null, '', '#p=' + hash);
+  try {
+    await navigator.clipboard.writeText(url);
+    setStat('link copied \u00b7 ' + url.length + ' chars');
+  } catch(e){
+    setStat('link is in the address bar \u2014 copy it from there');
+  }
+}
+
+function loadFromHash(){
+  const m = /[#&]p=([A-Za-z0-9\-_]+)/.exec(location.hash || '');
+  if(!m) return false;
+  try {
+    const p = decode(m[1]);
+    loadPreset(p);
+    if(p.name && $('presetName')) $('presetName').value = p.name;
+    return true;
+  } catch(e){
+    console.error('[catoptron3d] bad preset link', e);
+    setStat('that link is not a valid preset');
+    return false;
+  }
 }
 
 /* ── stack ─────────────────────────────────────────────────────────────────────────────── */
@@ -615,6 +757,20 @@ function buildPanel(){
   $('imgBtn').onclick = () => $('imgFile').click();
   $('imgClear').onclick = clearImage;
   refreshImgLabel();
+
+  $('presetSave').onclick   = savePreset;
+  $('presetLoad').onclick   = () => {
+    const n = $('presetList').value;
+    if(!n) return;
+    const all = lsRead();
+    if(all[n]){ loadPreset(all[n]); $('presetName').value = n; }
+  };
+  $('presetDelete').onclick = deletePreset;
+  $('presetExport').onclick = exportPreset;
+  $('presetImport').onclick = () => $('presetFile').click();
+  $('presetFile').addEventListener('change', e => importPresetFile(e.target.files[0]));
+  $('presetLink').onclick   = copyLink;
+  refreshPresetList();
 
   const starters = $('starters');
   Object.keys(STARTERS).forEach(k => {
@@ -951,8 +1107,10 @@ buildPanel();
 relayout();
 // A starting stack that shows what the tool is for: octahedral mirror planes plus a box fold,
 // recursed. Both are exact isometries, so this is a mathematically clean first image.
-state.stack = [newSlot(8), newSlot(5)];
-state.stack[0].p = [0.42];
-state.stack[1].p = [1.0];
-renderStack();
+if(!loadFromHash()){
+  state.stack = [newSlot(8), newSlot(5)];
+  state.stack[0].p = [0.42];
+  state.stack[1].p = [1.0];
+  renderStack();
+}
 requestAnimationFrame(frame);
