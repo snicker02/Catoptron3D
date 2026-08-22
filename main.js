@@ -46,6 +46,8 @@ const state = {
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
   // colour
   seamSurf: 0,
+  seed: 1337,
+  xShards: 9, xFacets: 6, xLen: 1.3, xRad: 0.045, xTip: 1.15, xSpread: 1.0, xVary: 0.85,
   cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
   sun: 0.0, haze: 0.0,
   palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0.0, exposure: 1.25, sat: 1.0,
@@ -99,6 +101,16 @@ const GROUPS = [
     ['rim',       'Rim',       0, 3,   0.01,  2],
     ['fog',       'Fog',       0, 3,   0.01,  2]
   ]],
+  ['Crystal', [
+    ['seed',    'Seed',      1, 9999, 1,   0],
+    ['xShards', 'Shards',    1, 14,  1,     0],
+    ['xFacets', 'Facets',    3, 12,  1,     0],
+    ['xLen',    'Length',    0.1, 4, 0.01,  2],
+    ['xRad',    'Radius',    0.004, 0.4, 0.002, 3],
+    ['xTip',    'Point length', 0, 1.45, 0.005, 3],
+    ['xSpread', 'Spread',    0, 1,   0.01,  2],
+    ['xVary',   'Variation', 0, 1,   0.01,  2]
+  ]],
   ['City', [
     ['cityStreet', 'Street width',    0.02, 0.9, 0.005, 3],
     ['cityHeight', 'Building height', 0.05, 4,   0.01,  2],
@@ -133,7 +145,7 @@ const GROUPS = [
 
 /* Groups that belong on the STRUCTURE panel (right). Everything else is look and output, and
    stays on the left. The split is "what am I building" vs "how is it presented". */
-const RIGHT_GROUPS = new Set(['Primitive', 'IFS recursion', 'City']);
+const RIGHT_GROUPS = new Set(['Primitive', 'IFS recursion', 'City', 'Crystal']);
 
 /* ── GL bootstrap ──────────────────────────────────────────────────────────────────────── */
 const cv = document.getElementById('c');
@@ -266,6 +278,14 @@ function renderScene(w, h){
   const bg = P.bg || DARK;
   u3(L, 'uBgTop', bg[0][0], bg[0][1], bg[0][2]);
   u3(L, 'uBgBot', bg[1][0], bg[1][1], bg[1][2]);
+  u1(L, 'uSeed', state.seed);
+  u1(L, 'uXShards', state.xShards);
+  u1(L, 'uXFacets', state.xFacets);
+  u1(L, 'uXLen', state.xLen);
+  u1(L, 'uXRad', state.xRad);
+  u1(L, 'uXTip', state.xTip);
+  u1(L, 'uXSpread', state.xSpread);
+  u1(L, 'uXVary', state.xVary);
   u1(L, 'uCityStreet', state.cityStreet);
   u1(L, 'uCityHeight', state.cityHeight);
   u1(L, 'uCityVar', state.cityVar);
@@ -369,6 +389,28 @@ const STARTERS = {
            ambient: 0.42, spec: 0.2, rim: 0.3, palette: 7, trapScale: 0.4, trapShift: 0.25,
            sat: 0.8, exposure: 1.12, renderScale: 0.6 }
   },
+  'Crystal cluster': {
+    stack: [{ t: 8, p: [0.0] }],
+    set: { iters: 3, ifsScale: 0.8, ifsCx: 0, ifsCy: 0, ifsCz: 0, prim: 6, primStyle: 0,
+           steps: 256, stepScale: 0.85, eps: 0.00035, seed: 1337,
+           xShards: 10, xFacets: 6, xLen: 1.0, xRad: 0.035, xTip: 1.25, xSpread: 0.75, xVary: 0.85,
+           bounces: 1, reflect: 0.6, fresnel: 0.9, metal: 0,
+           ao: 1.1, fog: 0.08, haze: 0, sun: 0, ambient: 0.14, spec: 1.3, rim: 1.8,
+           camDist: 2.8, fov: 1.2, camAzim: 0.9, camElev: 0.20,
+           palette: 2, trapScale: 0.9, trapShift: 0.10, sat: 1.0, exposure: 1.6,
+           renderScale: 0.7 }
+  },
+  'Crystal field': {
+    stack: [{ t: 11, p: [2.6, 2.6, 2.6] }],
+    set: { iters: 1, ifsScale: 1.0, prim: 6, primStyle: 0,
+           steps: 256, stepScale: 0.85, eps: 0.00035, seed: 1337,
+           xShards: 12, xFacets: 6, xLen: 1.1, xRad: 0.030, xTip: 1.25, xSpread: 1.0, xVary: 0.85,
+           bounces: 1, reflect: 0.6, fresnel: 0.9, metal: 0,
+           ao: 1.1, fog: 0.08, haze: 0, sun: 0, ambient: 0.14, spec: 1.3, rim: 1.8,
+           camDist: 5.5, fov: 1.2, camAzim: 0.9, camElev: 0.14,
+           palette: 2, trapScale: 0.9, trapShift: 0.10, sat: 1.0, exposure: 1.6,
+           renderScale: 0.6 }
+  },
   'Crystal lattice': {
     stack: [{ t: 19, p: [7, 1.2] }],
     set: { iters: 1, ifsScale: 1.0, prim: 4, primSize: 0.24, primRound: 0.04, primAux: 0.075,
@@ -422,7 +464,9 @@ const STARTERS = {
   }
 };
 
-const STARTER_RESET = { primStyle: 0, primThick: 0.03, feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
+const STARTER_RESET = { primStyle: 0, primThick: 0.03, seed: 1337,
+                        xShards: 9, xFacets: 6, xLen: 1.3, xRad: 0.045, xTip: 1.15,
+                        xSpread: 1.0, xVary: 0.85, feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
                         primRound: 0.06, primAux: 0.35, juliaCx: 0, juliaCy: 0, juliaCz: 0, seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
