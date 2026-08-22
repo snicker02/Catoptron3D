@@ -91,6 +91,10 @@ out vec4 fragColor;
 #define DEG 0.01745329252
 uniform vec4  uPk0, uPk1;
 uniform float uSpread;
+// Flame IFS bakes its matrices into the assembled shader, so in the probe it compiles as the
+// identity. Its expansion factor is computed in double precision at import time and unit-tested
+// in tools/test-presets.mjs; the composed estimator is covered by gate 3.
+#define FLAME_N 0
 """ + _UNIFORMS + "\n"
 
 PROBE_TAIL = """
@@ -284,6 +288,7 @@ def gate_de():
             if u in prog: prog[u].value = val
         for u, val in (('uIfsCenter', (1.0, 1.0, 1.0)), ('uIfsRot', (0.0, 0.0, 0.0))):
             if u in prog: prog[u].value = val
+        if 'uPrimSize' in prog and d.get('prim') == 2: prog['uPrimSize'].value = 0.01
         for i, sl in enumerate(d['stack']):
             pk = list(sl['p']) + [0.0] * 8
             nb = max(1, (len(sl['p']) + 3) // 4)
