@@ -81,7 +81,7 @@ out vec4 fragColor;
 #define TAU 6.28318530718
 #define DEG 0.01745329252
 uniform vec2  uRes;
-uniform float uPrimSize, uPrimRound, uPrimAux, uSeed, uSpread;
+uniform float uPrimSize, uPrimRound, uPrimAux, uPrimThick, uSeed, uSpread;
 uniform vec4  uPk0, uPk1;
 uniform vec3  uPal0, uPal1, uPal2, uPal3;
 uniform float uCityStreet, uCityHeight, uCityVar, uCityDetail;
@@ -272,7 +272,7 @@ def gate_de():
             FAILED.append(('DE-COMPILE', d['label'], str(e)[:300])); all_ok = False; continue
         va = quad(prog)
         for u, val in (('uPrimSize', 0.9), ('uPrimRound', 0.06), ('uPrimAux', 0.35),
-                       ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002),
+                       ('uPrimThick', 0.03), ('uIfsScale', 1.9), ('uStepScale', 1.0), ('uEps', 0.002),
                        ('uBailout', 6.0),
                        ('uCityStreet', 0.28), ('uCityHeight', 0.9), ('uCityVar', 0.7),
                        ('uCityDetail', 0.0), ('uSun', 0.0), ('uHaze', 0.0)):
