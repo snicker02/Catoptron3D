@@ -116,11 +116,43 @@ One record in `engine/ops.js`: `name`, `fn` matching the GLSL function name, `li
 
 ---
 
+## Presets
+
+Three routes out of the tool:
+
+- **Named slots** in localStorage — fast, this browser only.
+- **`.json` export / import** — portable and archivable.
+- **`copy link`** — the whole look encodes into a URL hash. A real state (59 keys plus a fold
+  stack) comes to about 350 characters, so a look is something you can paste to yourself.
+  Opening a link applies it before the default stack is built.
+
+The format lives in `engine/preset.js` and is deliberately **pure** — no DOM, no storage, no
+globals — so it is unit-tested headlessly by `tools/test-presets.mjs` (32 tests) rather than only
+being clickable. Two decisions in it are worth knowing:
+
+**Operators are stored by NAME, not only index.** Index is the fast path, name is the authority.
+The op list has grown every session and will keep growing; the day an op is inserted in the
+middle, every index-only preset silently becomes a different artwork. A name mismatch is
+recoverable and warns; a silent wrong-op is not. Unresolvable slots are dropped rather than
+substituted.
+
+**Only non-default values are stored, and loading resets to defaults first.** An omitted key is
+therefore deterministic rather than "whatever happened to be there", which is what makes loading
+two presets in a row reproducible — and what keeps a preset small enough to live in a URL.
+
+The end-to-end test reads the state literal out of `main.js` rather than a stand-in, captures a
+session, sends it through the URL encoder and back, and asserts the assembled GLSL is
+**byte-identical**. It fails if a state key is added and presets are forgotten.
+
+A loaded image is **not** part of a preset: a photo cannot go in a URL, and silently baking one
+into a file would make presets unpredictably large. Reload the image after loading a preset.
+
 ## Validation
 
 ```
 node tools/dump.mjs > tools/dump.json
 python3 tools/validate.py            # add --canary to prove the gate still has teeth
+node tools/test-presets.mjs          # preset format, pure functions, no browser needed
 ```
 
 Three gates, all against a real GL driver (Mesa/llvmpipe via EGL), compiling the exact
