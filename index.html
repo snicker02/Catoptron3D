@@ -115,6 +115,12 @@ button:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .starters{display:flex;flex-wrap:wrap;gap:5px}
 .starters button{flex:1 1 calc(50% - 3px);text-align:left;font-size:10px;padding:6px 8px}
 .note{font-family:var(--mono);font-size:9px;line-height:1.6;color:var(--note);margin:2px 0 8px}
+.tin{
+  width:100%;background:var(--sunken);border:1px solid var(--edge);border-radius:5px;
+  color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
+}
+.tin::placeholder{color:var(--note)}
+.tin:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .savelink{margin-top:6px}
 .savelink a{font-family:var(--mono);font-size:10px;color:var(--ice1);text-decoration:underline;
   display:inline-block;padding:4px 0;line-height:1.5}
@@ -198,6 +204,27 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <div id="savelink" class="savelink"></div>
     <p class="note">A photo has no plane to fold in 3D, so it lands as the environment (seen in
     every reflection) or as a triplanar surface texture. Sliders are in the Image group below.</p>
+  </div>
+
+  <div class="group">
+    <h2>Presets</h2>
+    <input type="text" id="presetName" class="tin" placeholder="preset name" aria-label="Preset name">
+    <div class="row" style="margin-top:5px">
+      <button id="presetSave">save</button>
+      <button id="presetLink">copy link</button>
+    </div>
+    <select id="presetList" aria-label="Saved presets" style="margin-top:5px"></select>
+    <div class="row" style="margin-top:5px">
+      <button id="presetLoad">load</button>
+      <button id="presetDelete">delete</button>
+    </div>
+    <div class="row" style="margin-top:5px">
+      <button id="presetExport">export .json</button>
+      <button id="presetImport">import</button>
+    </div>
+    <input type="file" id="presetFile" accept="application/json,.json" hidden>
+    <p class="note">Saved in this browser. Export or copy a link to keep a look anywhere.
+    A loaded image is not part of a preset — reload it after.</p>
   </div>
 
   <div class="group">
