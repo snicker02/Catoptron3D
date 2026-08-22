@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.12.0-crystal';
+export const BUILD = '0.14.0-topbar';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -57,6 +57,10 @@ uniform float uSpec;
 uniform float uReflect;
 uniform float uFresnel;
 uniform float uMetal;
+uniform float uTransp;      // 0 opaque, 1 fully transmissive
+uniform float uIOR;
+uniform float uAbsorb;      // Beer-Lambert density inside the medium
+uniform float uDisp;        // per-channel IOR spread
 uniform float uRim;
 uniform float uFog;
 
