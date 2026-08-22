@@ -31,6 +31,14 @@ export function capture(state, defaults, OPS, name = ''){
     v: PRESET_VERSION,
     name,
     s,
+    f: state.flame ? {
+      name: state.flame.name,
+      maps: state.flame.maps.map(m => ({
+        M: m.M.map(v => round(v, 9)), T: m.T.map(v => round(v, 9)),
+        Mi: m.Mi.map(v => round(v, 9)), Ti: m.Ti.map(v => round(v, 9)),
+        scale: round(m.scale, 9), expand: round(m.expand, 9), weight: round(m.weight, 6)
+      }))
+    } : null,
     k: (state.stack || []).map(sl => ({
       t: sl.type,
       n: OPS[sl.type] ? OPS[sl.type].name : '',
@@ -97,7 +105,11 @@ export function apply(preset, defaults, OPS){
     });
   });
 
-  return { state, stack, warnings };
+  // A flame is baked geometry, not a slider — carry it verbatim so a saved look keeps its shape.
+  const flame = (p.f && Array.isArray(p.f.maps) && p.f.maps.length) ? p.f : null;
+  if(p.f && !flame) warnings.push('preset carried an unusable flame; ignored');
+
+  return { state, stack, warnings, flame };
 }
 
 // ── url encoding ───────────────────────────────────────────────────────────────────────────
