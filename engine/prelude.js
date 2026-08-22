@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.11.0-frames';
+export const BUILD = '0.12.0-crystal';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -73,6 +73,19 @@ uniform float uEnvGain;
 uniform float uEnvRot;
 uniform float uTexAmt;
 uniform float uTexScale;
+
+// Global seed. Currently read only by the crystal cluster; the city hash is deliberately left
+// unseeded so that existing presets keep rendering the same city.
+uniform float uSeed;
+
+// crystal cluster primitive
+uniform float uXShards;
+uniform float uXFacets;
+uniform float uXLen;
+uniform float uXRad;
+uniform float uXTip;
+uniform float uXSpread;
+uniform float uXVary;
 
 // city primitive
 uniform float uCityStreet;
