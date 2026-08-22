@@ -131,6 +131,70 @@ float bisectDist(vec3 p, vec3 c1, vec3 c2){
   return abs(dot(p - 0.5 * (c1 + c2), d / L));
 }` },
 
+  // ── crystal ──
+  sdShard: { deps: [], src: `
+// One crystal shard: a regular n-gonal prism with a pyramidal termination, growing along +z.
+//
+// Built as an intersection of half-spaces, which for a convex solid is both simple and SAFE:
+// max() of plane distances underestimates the true distance outside the body, and an
+// underestimate is the harmless direction for a distance estimator.
+//   side — the prism wall, exact for a regular n-gon via the apothem coordinate r*cos(a)
+//   base — the z = 0 cut
+//   cap  — a single tilted plane in the folded wedge, which becomes the n faces of the point
+//
+// The termination length is R*tan(tip), so a tip near zero is a FLAT top and values approaching
+// pi/2 give a long needle. Worth knowing, because the intuition runs the other way.
+float sdShard(vec3 p, float R, float H, float n, float tip){
+  float seg = TAU / max(n, 3.0);
+  float a = atan(p.y, p.x);
+  a = abs(mod(a, seg) - seg * 0.5);
+  float u = length(vec2(p.x, p.y)) * cos(a);     // distance to the prism axis, along a facet normal
+  float side = u - R;
+  float base = -p.z;
+  float ct = cos(tip), st = sin(tip);
+  float cap = u * st + (p.z - H) * ct;
+  return max(max(side, base), cap);
+}` },
+
+  sdCrystal: { deps: ['hash13', 'sdShard'], src: `
+// A cluster of shards radiating from the origin. The union of exact shards is exact, and each
+// shard is placed by a rotation, which is an isometry — so the whole primitive is distance-safe.
+//
+// Directions, lengths and radii are hashed per shard, because a perfectly symmetric cluster
+// reads as synthetic. For a SYMMETRIC cluster, set Spread to 0 and put a Polyhedral mirror or
+// Sector fold in the stack instead — that is the idiomatic way to get order here.
+float sdCrystal(vec3 p){
+  float d = 1e9;
+  float N = clamp(floor(uXShards + 0.5), 1.0, 14.0);
+  for(int i = 0; i < 14; i++){
+    if(float(i) >= N) break;
+    float fi = float(i);
+    float h1 = hash13(vec3(fi, uSeed * 0.017, 1.3));
+    float h2 = hash13(vec3(fi, uSeed * 0.017, 7.1));
+    float h3 = hash13(vec3(fi, uSeed * 0.017, 3.7));
+    float h4 = hash13(vec3(fi, uSeed * 0.017, 11.9));
+
+    // a direction on the sphere, blended from +y toward random by Spread
+    float z0 = h1 * 2.0 - 1.0;
+    float ph = h2 * TAU;
+    float rr = sqrt(max(0.0, 1.0 - z0 * z0));
+    vec3 rnd = vec3(rr * cos(ph), z0, rr * sin(ph));
+    vec3 dir = normalize(mix(vec3(0.0, 1.0, 0.0), rnd, clamp(uXSpread, 0.0, 1.0)) + 1e-4);
+
+    // orthonormal frame with dir as the growth axis
+    vec3 up = abs(dir.y) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 t1 = normalize(cross(up, dir));
+    vec3 t2 = cross(dir, t1);
+    vec3 q = vec3(dot(p, t1), dot(p, t2), dot(p, dir));
+
+    float v = clamp(uXVary, 0.0, 1.0);
+    float L = uXLen * mix(1.0, 0.25 + 1.5 * h3, v);
+    float R = uXRad * mix(1.0, 0.35 + 1.3 * h4, v);
+    d = min(d, sdShard(q, R, L, uXFacets, uXTip));
+  }
+  return d;
+}` },
+
   // ── frames ──
   // A "frame" keeps only the edges of a solid. There is no universal formula for it — edges are
   // a feature of the specific shape — so each one is written by hand. Shell (abs(d) - t) IS
