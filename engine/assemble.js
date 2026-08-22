@@ -12,6 +12,7 @@
 import { PRELUDE, VS } from './prelude.js';
 import { HELPERS } from './helpers.js';
 import { OPS, discIdx, fnName, bankCount } from './ops.js';
+import { flameKey } from './flame.js';
 
 export { VS };
 
@@ -84,6 +85,7 @@ export function normalizeCfg(cfg){
     seamSurf: !!cfg.seamSurf,
     primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
     transp:   !!cfg.transp,
+    flame:    cfg.flame || null,
     disp:     !!cfg.disp,
     feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
@@ -102,7 +104,8 @@ export function signature(cfg){
   }).join(',');
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
-          c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces, ops].join('|');
+          c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces,
+          flameKey(c.flame), ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -140,6 +143,28 @@ export function assemble(cfgIn){
 
   const folds = cfg.stack.map(foldCall).join('\n');
 
+  // An imported flame is baked into the shader as constants rather than pushed as uniforms:
+  // a 4-map IFS is 48 numbers, the inverses and operator norms are computed once in double
+  // precision on the JS side, and changing the flame is a rebuild anyway (it changes the shape).
+  const F = cfg.flame;
+  const f3 = v => (Math.abs(v) < 1e-12 ? '0.0' : v.toPrecision(9));
+  const flameSrc = (F && F.maps && F.maps.length) ? `
+#define FLAME_N ${F.maps.length}
+// mat3 is column-major in GLSL; the parser stores row-major, hence the transpose here.
+const mat3 FLAME_MI[FLAME_N] = mat3[FLAME_N](
+${F.maps.map(m => '  mat3(' + [0, 1, 2].map(c => [0, 1, 2].map(r => f3(m.Mi[r * 3 + c])).join(', ')).join(', ') + ')').join(',\n')}
+);
+const vec3 FLAME_TI[FLAME_N] = vec3[FLAME_N](
+${F.maps.map(m => '  vec3(' + m.Ti.map(f3).join(', ') + ')').join(',\n')}
+);
+const float FLAME_EX[FLAME_N] = float[FLAME_N](
+${F.maps.map(m => '  ' + f3(m.expand)).join(',\n')}
+);
+const vec3 FLAME_FP[FLAME_N] = vec3[FLAME_N](
+${F.maps.map(m => '  vec3(' + (m.fp || [0, 0, 0]).map(f3).join(', ') + ')').join(',\n')}
+);` : '\n#define FLAME_N 0';
+
+
   // The IFS contraction. Emitted only when iterating, so iters == 1 is byte-identical to a
   // plain single pass of the stack — same guarantee the 2D tool gives when IFS is off.
   // The IFS contraction, plus optional ESCAPE-TIME feedback.
@@ -165,6 +190,7 @@ export function assemble(cfgIn){
   return `${PRELUDE}
 ${decls}
 ${helperSrc}
+${flameSrc}
 
 ${opSrc}
 
