@@ -31,7 +31,8 @@ export const PRIMS = [
   { name: 'Torus',     fn: 'sdTorus',  deps: ['sdTorus'],
     frame: 'sdTorusFrame', frameDeps: ['sdTorusFrame'] },
   { name: 'City',      fn: 'sdCity',   deps: ['sdCity'],
-    frame: 'sdCityFrame', frameDeps: ['sdCityFrame'] }
+    frame: 'sdCityFrame', frameDeps: ['sdCityFrame'] },
+  { name: 'Crystal',   fn: 'sdCrystal', deps: ['sdCrystal'] }
 ];
 
 export const PRIM_STYLES = ['solid', 'shell (hollow)', 'frame (edges)'];
