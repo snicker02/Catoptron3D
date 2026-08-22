@@ -8,7 +8,7 @@
 
 import { BUILD } from './engine/prelude.js';
 import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
-import { PRIMS, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
+import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 
@@ -35,7 +35,7 @@ const state = {
   // camera
   camDist: 5.2, camAzim: 0.9, camElev: 0.35, fov: 1.3, autoSpin: 0.0,
   // structure
-  prim: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35,
+  prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35, primThick: 0.03,
   iters: 8, ifsScale: 1.9, ifsRotX: 0, ifsRotY: 0, ifsRotZ: 0,
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
@@ -86,7 +86,8 @@ const GROUPS = [
   ['Primitive', [
     ['primSize',  'Size',   0.05, 3,   0.01,  2],
     ['primRound', 'Round',  0.0,  0.6, 0.005, 3],
-    ['primAux',   'Aux',    0.02, 1.5, 0.01,  2]
+    ['primAux',   'Aux',    0.02, 1.5, 0.01,  2],
+    ['primThick', 'Shell / frame thickness', 0.002, 0.4, 0.002, 3]
   ]],
   ['Lighting', [
     ['lightAzim', 'Light azim\u00b0', 0, 360, 1,    0],
@@ -163,6 +164,7 @@ function currentCfg(){
   return {
     stack:  state.stack.map(sl => ({ type: sl.type, p: sl.p.slice() })),
     prim:   state.prim,
+    primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
     ao:     state.ao > 0.001,
@@ -243,6 +245,7 @@ function renderScene(w, h){
   u1(L, 'uPrimSize', state.primSize);
   u1(L, 'uPrimRound', state.primRound);
   u1(L, 'uPrimAux', state.primAux);
+  u1(L, 'uPrimThick', state.primThick);
 
   const la = state.lightAzim * Math.PI / 180, le = state.lightElev * Math.PI / 180;
   u3(L, 'uLightDir', Math.cos(la) * Math.cos(le), Math.sin(le), Math.sin(la) * Math.cos(le));
@@ -338,6 +341,16 @@ const STARTERS = {
            ambient: 0.42, spec: 0.2, rim: 0.3, palette: 7, trapScale: 0.4, trapShift: 0.25,
            sat: 0.8, exposure: 1.12, renderScale: 0.6 }
   },
+  'Wire city': {
+    stack: [{ t: 17, p: [90, -90, 0] }],
+    set: { iters: 1, ifsScale: 1.0, prim: 5, primStyle: 2, primThick: 0.022,
+           primSize: 0.42, steps: 256, bounces: 0, reflect: 0,
+           ao: 1.0, fog: 0.05, haze: 0.35, sun: 1.0,
+           cityStreet: 0.34, cityHeight: 2.6, cityVar: 0.9, cityDetail: 0.0,
+           camDist: 24, fov: 1.15, camAzim: -1.5708, camElev: 0.24,
+           ambient: 0.42, spec: 0.25, rim: 0.35, palette: 6, trapScale: 0.4, trapShift: 0.25,
+           sat: 0.8, exposure: 1.15, renderScale: 0.6 }
+  },
   'Clay corner': {
     stack: [{ t: 17, p: [90, -90, 0] }, { t: 17, p: [0, -90, 2] }],
     set: { iters: 1, ifsScale: 1.0, prim: 5, primSize: 0.42, primRound: 0.03, steps: 192,
@@ -409,7 +422,7 @@ const STARTERS = {
   }
 };
 
-const STARTER_RESET = { feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
+const STARTER_RESET = { primStyle: 0, primThick: 0.03, feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
                         primRound: 0.06, primAux: 0.35, juliaCx: 0, juliaCy: 0, juliaCz: 0, seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
@@ -707,6 +720,8 @@ function buildGlobals(){
   g0.append(mkSelect('March steps', MARCH_STEPS.map(s => String(s)),
                      MARCH_STEPS.indexOf(state.steps),
                      v => { state.steps = MARCH_STEPS[v]; }, true));
+  g0.append(mkSelect('Style', PRIM_STYLES, state.primStyle,
+                     v => { state.primStyle = v; }, true));
   g0.append(mkSelect('Fold membrane', ['off', 'show seams'], state.seamSurf,
                      v => { state.seamSurf = v; }, true));
   g0.append(mkSelect('Mirror bounces', ['0 \u2014 off', '1', '2', '3', '4', '5', '6'],
