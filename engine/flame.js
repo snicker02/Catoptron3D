@@ -120,34 +120,13 @@ export function parseFlame(text){
       T = apply(a.M, T).map((v, i) => v + a.T[i]);
     });
 
-    const Mi = inv3(M);
-    if(!Mi){ warnings.push(`xform ${idx + 1} skipped: singular (zero determinant)`); return; }
-
-    const scale = opNorm(M);
-    if(scale >= 0.999){
-      warnings.push(`xform ${idx + 1} is not contractive (scale ${scale.toFixed(3)}) — ` +
+    if(!inv3(M)){ warnings.push(`xform ${idx + 1} skipped: singular (zero determinant)`); return; }
+    const sc = opNorm(M);
+    if(sc >= 0.999){
+      warnings.push(`xform ${idx + 1} is not contractive (scale ${sc.toFixed(3)}) — ` +
                     'the attractor is unbounded and will not resolve');
     }
-    // Fixed point of f(x) = Mx + T, i.e. solve (I - M)x = T. This is the attractor "vertex"
-    // that this map contracts toward, and selecting by nearest fixed point partitions space
-    // into proper Voronoi cells — which is what makes the backward iteration reconstruct the
-    // attractor instead of scattering it into beads.
-    const A = [
-      1 - M[0], -M[1], -M[2],
-      -M[3], 1 - M[4], -M[5],
-      -M[6], -M[7], 1 - M[8]
-    ];
-    const Ai = inv3(A);
-    const fp = Ai ? apply(Ai, T) : [0, 0, 0];
-    if(!Ai) warnings.push(`xform ${idx + 1}: no fixed point (map has eigenvalue 1)`);
-
-    maps.push({
-      M, T, Mi, fp,
-      Ti: apply(Mi, T).map(v => -v),               // inverse translation
-      scale,                                        // forward contraction
-      expand: opNorm(Mi),                           // inverse expansion, what the DE divides by
-      weight: at.weight === undefined ? 1 : Number(at.weight)
-    });
+    maps.push(makeXform(M, T, at.weight === undefined ? 1 : Number(at.weight)));
   });
 
   if(!maps.length) throw new Error('no usable linear xforms — this flame needs variations we cannot fold');
@@ -158,13 +137,66 @@ export function parseFlame(text){
   return { name, maps, warnings };
 }
 
-// Short stable key so the shader signature changes when the flame does.
+export const MAX_XFORMS = 8;
+
+// An xform keeps its IMPORTED affine untouched and layers editable offsets on top, so the
+// editor is non-destructive: "reset" restores exactly what the file said, and a preset can
+// record what you changed rather than a mangled matrix.
+export function makeXform(M, T, weight = 1){
+  return {
+    M: M.slice(), T: T.slice(),                    // base, from the file — never edited
+    scale: 1, rot: [0, 0, 0], tr: [0, 0, 0],       // editable offsets
+    on: true, weight
+  };
+}
+
+export function identityXform(){
+  // a plain 0.5 contraction toward the origin: a usable starting point for building by hand
+  return makeXform([0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5], [0, 0, 0], 1);
+}
+
+function rotM(deg){
+  const [a, b, c] = deg.map(d => d * Math.PI / 180);
+  const cx = Math.cos(a), sx = Math.sin(a), cy = Math.cos(b), sy = Math.sin(b),
+        cz = Math.cos(c), sz = Math.sin(c);
+  const Rx = [1, 0, 0, 0, cx, -sx, 0, sx, cx];
+  const Ry = [cy, 0, sy, 0, 1, 0, -sy, 0, cy];
+  const Rz = [cz, -sz, 0, sz, cz, 0, 0, 0, 1];
+  return mul(Rz, mul(Ry, Rx));
+}
+
+// Effective map for an xform: f(x) = R * (scale * (Mx + T)) + translate.
+// The editor offsets are applied AFTER the imported affine, which is what makes rotate and
+// translate behave the way they look on screen.
+export function resolveXform(x){
+  const R = rotM(x.rot);
+  const Ms = x.M.map(v => v * x.scale);
+  const M = mul(R, Ms);
+  const T = apply(R, x.T.map(v => v * x.scale)).map((v, i) => v + x.tr[i]);
+  const Mi = inv3(M);
+  if(!Mi) return null;
+  const A = [1 - M[0], -M[1], -M[2], -M[3], 1 - M[4], -M[5], -M[6], -M[7], 1 - M[8]];
+  const Ai = inv3(A);
+  return {
+    M, T, Mi,
+    Ti: apply(Mi, T).map(v => -v),
+    fp: Ai ? apply(Ai, T) : [0, 0, 0],
+    scale: opNorm(M),
+    expand: opNorm(Mi)
+  };
+}
+
+// All enabled xforms, resolved. This is what the renderer uploads.
+export function resolveFlame(flame){
+  if(!flame || !flame.maps) return [];
+  return flame.maps.filter(x => x.on !== false)
+                   .map(resolveXform)
+                   .filter(Boolean)
+                   .slice(0, MAX_XFORMS);
+}
+
+// Only the COUNT is baked into the shader; the matrices are uniforms, so editing a transform
+// is free rather than a recompile. That is the whole reason the editor feels live.
 export function flameKey(flame){
-  if(!flame || !flame.maps) return '0';
-  let h = 2166136261;
-  flame.maps.forEach(m => [...m.M, ...m.T].forEach(v => {
-    const s = v.toFixed(6);
-    for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-  }));
-  return (h >>> 0).toString(36);
+  return String(resolveFlame(flame).length);
 }
