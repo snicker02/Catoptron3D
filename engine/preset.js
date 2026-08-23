@@ -44,7 +44,7 @@ export function capture(state, defaults, OPS, name = ''){
         scale: round(x.scale, 6), rot: x.rot.map(v => round(v, 4)),
         tr: x.tr.map(v => round(v, 6)),
         vari: x.vari | 0, vamt: round(x.vamt, 6),
-        vp: [round((x.vp || [])[0], 6), round((x.vp || [])[1], 6)],
+        vp: (x.vp || []).slice(0, 12).map(v => round(v, 6)),
         on: x.on !== false, weight: round(x.weight || 1, 6)
       }))
     } : null,
@@ -127,8 +127,7 @@ export function apply(preset, defaults, OPS){
         rot: n3(x.rot, 0), tr: n3(x.tr, 0),
         vari: (x.vari | 0) || 0,
         vamt: isFinite(x.vamt) ? x.vamt : 1,
-        vp: [isFinite((x.vp || [])[0]) ? x.vp[0] : 0.8,
-             isFinite((x.vp || [])[1]) ? x.vp[1] : 2],
+        vp: Array.isArray(x.vp) ? x.vp.slice(0, 12) : [],
         on: x.on !== false, weight: isFinite(x.weight) ? x.weight : 1
       }))
     };
