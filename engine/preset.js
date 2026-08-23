@@ -31,12 +31,15 @@ export function capture(state, defaults, OPS, name = ''){
     v: PRESET_VERSION,
     name,
     s,
+    // A flame stores each xform's IMPORTED affine plus the editor's offsets, so a preset
+    // records what you changed rather than a flattened matrix — and stays re-editable.
     f: state.flame ? {
       name: state.flame.name,
-      maps: state.flame.maps.map(m => ({
-        M: m.M.map(v => round(v, 9)), T: m.T.map(v => round(v, 9)),
-        Mi: m.Mi.map(v => round(v, 9)), Ti: m.Ti.map(v => round(v, 9)),
-        scale: round(m.scale, 9), expand: round(m.expand, 9), weight: round(m.weight, 6)
+      maps: state.flame.maps.map(x => ({
+        M: x.M.map(v => round(v, 9)), T: x.T.map(v => round(v, 9)),
+        scale: round(x.scale, 6), rot: x.rot.map(v => round(v, 4)),
+        tr: x.tr.map(v => round(v, 6)),
+        on: x.on !== false, weight: round(x.weight || 1, 6)
       }))
     } : null,
     k: (state.stack || []).map(sl => ({
@@ -106,8 +109,22 @@ export function apply(preset, defaults, OPS){
   });
 
   // A flame is baked geometry, not a slider — carry it verbatim so a saved look keeps its shape.
-  const flame = (p.f && Array.isArray(p.f.maps) && p.f.maps.length) ? p.f : null;
-  if(p.f && !flame) warnings.push('preset carried an unusable flame; ignored');
+  let flame = null;
+  if(p.f && Array.isArray(p.f.maps) && p.f.maps.length){
+    const n3 = (a, d) => [0, 1, 2].map(i => (Array.isArray(a) && isFinite(a[i])) ? a[i] : d);
+    flame = {
+      name: p.f.name || 'flame',
+      maps: p.f.maps.filter(x => Array.isArray(x.M) && x.M.length === 9).map(x => ({
+        M: x.M.slice(), T: n3(x.T, 0),
+        scale: isFinite(x.scale) ? x.scale : 1,
+        rot: n3(x.rot, 0), tr: n3(x.tr, 0),
+        on: x.on !== false, weight: isFinite(x.weight) ? x.weight : 1
+      }))
+    };
+    if(!flame.maps.length){ flame = null; warnings.push('preset flame had no usable transforms'); }
+  } else if(p.f){
+    warnings.push('preset carried an unusable flame; ignored');
+  }
 
   return { state, stack, warnings, flame };
 }
