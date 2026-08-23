@@ -12,7 +12,8 @@
 import { PRELUDE, VS } from './prelude.js';
 import { HELPERS } from './helpers.js';
 import { OPS, discIdx, fnName, bankCount } from './ops.js';
-import { flameKey, resolveFlame, flameVars } from './flame.js';
+import { flameKey, resolveFlame, flameVars, FLAME_VARIATIONS } from './flame.js';
+const FLAME_VARIATION_COUNT = FLAME_VARIATIONS.length;
 
 export { VS };
 
@@ -157,6 +158,9 @@ export function assemble(cfgIn){
   // A flame xform is f(p) = V(affine(p)), and this path needs f inverse:
   //     f^-1(q) = affine^-1( V^-1(q) )
   // so each block applies the variation's inverse first and the affine inverse second.
+  // slot -> uniform component, across three vec4 arrays per xform
+  const VP = (k, i) => `${['uFlameVP', 'uFlameVQ', 'uFlameVR'][Math.floor(i / 4)]}[${k}].${'xyzw'[i % 4]}`;
+
   const V_INV = [
     // linear3D: V(p) = A*p
     k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
@@ -168,7 +172,7 @@ export function assemble(cfgIn){
     // swirl: radius is preserved (up to the amount) and the angle turns by -k*r^2, so undoing
     // it is exact — unwind the amount first, then turn the angle back by the SAME r
     k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
-        float kk = uFlameVP[${k}].x;
+        float kk = ${VP(k, 0)};
         vec3 u = q / A;
         float r2 = u.x * u.x + u.y * u.y;
         float th = kk * r2;
@@ -179,14 +183,98 @@ export function assemble(cfgIn){
     // radial power: rho -> A*rho^n with the direction kept, so the inverse is (rho/A)^(1/n).
     // Radial and tangential eigenvalues differ, hence the max.
     k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
-        float n = uFlameVP[${k}].y; n = abs(n) < 0.05 ? (n < 0.0 ? -0.05 : 0.05) : n;
+        float n = ${VP(k, 1)}; n = abs(n) < 0.05 ? (n < 0.0 ? -0.05 : 0.05) : n;
         float r = max(length(q), 1e-9);
         float rin = pow(max(r / abs(A), 1e-12), 1.0 / n);
         q = q * (rin / r);
         float tang = rin / r;
         float radial = abs(rin / (n * r));
-        ve = max(tang, radial); }`
+        ve = max(tang, radial); }`,
+    // exp: V(p) = A*e^x*(cos y, sin y), z scaled. The inverse is the PRINCIPAL log, which is a
+    // right inverse everywhere off the axis — exactly what the backward path needs, even though
+    // exp is many-to-one going forward. Conformal, so the norm is 1/|q_xy|.
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float rr = max(length(q.xy), 1e-7);
+        q = vec3(log(rr / abs(A)), atan(q.y, q.x), q.z / A);
+        ve = max(1.0 / rr, 1.0 / abs(A)); }`,
+    // log: the mirror image of exp — its inverse IS exp.
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float e = exp(q.x / A);
+        q = vec3(e * cos(q.y / A), e * sin(q.y / A), q.z / A);
+        ve = max(e / abs(A), 1.0 / abs(A)); }`,
+    // unpolar: A*e^y*(sin x, cos x) — exp with the axes swapped, inverted the same way
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float rr = max(length(q.xy), 1e-7);
+        q = vec3(atan(q.x, q.y), log(rr / abs(A)), q.z / A);
+        ve = max(1.0 / rr, 1.0 / abs(A)); }`,
+    // polar: (A*theta/pi, A*(r-1)). Its preimage needs r > 0, so a point below that has none —
+    // report a huge distance instead so the selection simply picks a different map.
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float th = PI * q.x / A;
+        float rr = q.y / A + 1.0;
+        if(rr <= 1e-6){ q = vec3(1e12); ve = 1e12; }
+        else {
+          q = vec3(rr * cos(th), rr * sin(th), q.z / A);
+          ve = max(PI * rr / abs(A), 1.0 / abs(A));
+        } }`,
+    // zscale: (x, y, A*z). JWildfire's zscale only WRITES z, so on its own it would collapse a
+    // dimension; the standard usage pairs it with linear3D, and that pairing is what this is.
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        q = vec3(q.x, q.y, q.z / A);
+        ve = max(1.0, 1.0 / abs(A)); }`,
+    // zcone: (x, y, z + A*sqrt(x^2+y^2)) — again the linear3D pairing. A shear in z, so the
+    // inverse just subtracts the cone back off.
+    k => `      { float A = uFlameVAmt[${k}];
+        q = vec3(q.x, q.y, q.z - A * length(q.xy));
+        ve = sqrt(3.0 + A * A); }`
   ];
+
+  // The complex-analytic family, generated from one template. Each entry is
+  //   [ inverse expression, |forward derivative| expression ]
+  // evaluated at w = f^-1(q/A). Because these maps are conformal the inverse's derivative is
+  // just the reciprocal of the forward one, so only the FORWARD derivative has to be written —
+  // twelve hand-derived inverse derivatives would have been twelve chances to be subtly wrong.
+  const CX = [
+    ['sin',  'casin(u)',        'ccos(w)'],
+    ['cos',  'cacos(u)',        'csin(w)'],
+    ['tan',  'catan(u)',        'cinv(csqr(ccos(w)))'],
+    ['sinh', 'casinh(u)',       'ccosh(w)'],
+    ['cosh', 'cacosh(u)',       'csinh(w)'],
+    ['tanh', 'catanh(u)',       'cinv(csqr(ccosh(w)))'],
+    ['sec',  'cacos(cinv(u))',  'cdiv(csin(w), csqr(ccos(w)))'],
+    ['csc',  'casin(cinv(u))',  'cdiv(ccos(w), csqr(csin(w)))'],
+    ['cot',  'catan(cinv(u))',  'cinv(csqr(csin(w)))'],
+    ['sech', 'cacosh(cinv(u))', 'cdiv(csinh(w), csqr(ccosh(w)))'],
+    ['csch', 'casinh(cinv(u))', 'cdiv(ccosh(w), csqr(csinh(w)))'],
+    ['coth', 'catanh(cinv(u))', 'cinv(csqr(csinh(w)))']
+  ];
+  CX.forEach(([, inv, der]) => V_INV.push(k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        vec2 u = vec2(q.x, q.y) / A;
+        vec2 w = ${inv};
+        float dm = max(length(${der}), 1e-7);
+        q = vec3(w.x, w.y, q.z / A);
+        ve = max(1.0 / (abs(A) * dm), 1.0 / abs(A)); }`));
+
+  // mobius3D: T(p) = b + lambda*R*(p-a)/|p-a|^2. The inverse undoes translate, scale and
+  // rotation, then inverts about the centre again — every step closed form, and conformal, so
+  // the norm is exactly 1/(lambda*|u|^2).
+  V_INV.push(k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        vec3 ctr = vec3(${VP(k, 2)}, ${VP(k, 3)}, ${VP(k, 4)});
+        vec3 mv  = vec3(${VP(k, 5)}, ${VP(k, 6)}, ${VP(k, 7)});
+        float lam = ${VP(k, 8)}; lam = abs(lam) < 1e-4 ? 1e-4 : lam;
+        vec3 rot = vec3(${VP(k, 9)}, ${VP(k, 10)}, ${VP(k, 11)});
+        vec3 u = rotE3inv((q / A - mv) / lam, rot);
+        float uu = max(dot(u, u), 1e-12);
+        q = ctr + u / uu;
+        ve = 1.0 / (abs(A) * abs(lam) * uu); }`);
+
+  // V_INV is indexed by the variation id, so it must line up with FLAME_VARIATIONS exactly.
+  // An off-by-one here silently gives an xform a DIFFERENT variation's inverse, which renders
+  // as plausible-but-wrong geometry rather than as an error.
+  if(V_INV.length !== FLAME_VARIATION_COUNT){
+    throw new Error('variation table desync: ' + V_INV.length + ' inverses for ' +
+                    FLAME_VARIATION_COUNT + ' variations');
+  }
 
   const flameBlocks = (cfg.flameVars || []).slice(0, cfg.flameN).map((v, k) => `
     {
@@ -200,7 +288,34 @@ ${(V_INV[v] || V_INV[0])(k)}
       if(d < best){ best = d; bq = q; bex = ex; }
     }`).join('');
 
-  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? `
+  // Complex arithmetic, emitted once and only when a flame is present.
+  const CPLX = `
+vec2 cmul(vec2 a, vec2 b){ return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+vec2 cinv(vec2 a){ float d = max(dot(a, a), 1e-12); return vec2(a.x, -a.y) / d; }
+vec2 cdiv(vec2 a, vec2 b){ return cmul(a, cinv(b)); }
+vec2 csqr(vec2 a){ return vec2(a.x * a.x - a.y * a.y, 2.0 * a.x * a.y); }
+vec2 cexpc(vec2 a){ float e = exp(a.x); return vec2(e * cos(a.y), e * sin(a.y)); }
+vec2 clog(vec2 a){ return vec2(0.5 * log(max(dot(a, a), 1e-30)), atan(a.y, a.x)); }
+vec2 csqrtc(vec2 a){
+  float r = sqrt(max(length(a), 1e-30));
+  float t = atan(a.y, a.x) * 0.5;
+  return vec2(r * cos(t), r * sin(t));
+}
+vec2 csin(vec2 a){ return vec2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y)); }
+vec2 ccos(vec2 a){ return vec2(cos(a.x) * cosh(a.y), -sin(a.x) * sinh(a.y)); }
+vec2 csinh(vec2 a){ return vec2(sinh(a.x) * cos(a.y), cosh(a.x) * sin(a.y)); }
+vec2 ccosh(vec2 a){ return vec2(cosh(a.x) * cos(a.y), sinh(a.x) * sin(a.y)); }
+vec2 cmi(vec2 a){ return vec2(a.y, -a.x); }            // multiply by -i
+vec2 cpi(vec2 a){ return vec2(-a.y, a.x); }            // multiply by +i
+vec2 casin(vec2 z){ return cmi(clog(cpi(z) + csqrtc(vec2(1.0, 0.0) - csqr(z)))); }
+vec2 cacos(vec2 z){ return cmi(clog(z + cpi(csqrtc(vec2(1.0, 0.0) - csqr(z))))); }
+vec2 catan(vec2 z){ return 0.5 * cpi(clog(cdiv(vec2(0.0, 1.0) + z, vec2(0.0, 1.0) - z))); }
+vec2 casinh(vec2 z){ return clog(z + csqrtc(csqr(z) + vec2(1.0, 0.0))); }
+vec2 cacosh(vec2 z){ return clog(z + csqrtc(csqr(z) - vec2(1.0, 0.0))); }
+vec2 catanh(vec2 z){ return 0.5 * clog(cdiv(vec2(1.0, 0.0) + z, vec2(1.0, 0.0) - z)); }
+`;
+
+  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? CPLX + `
 vec3 flameFold(vec3 p, inout float s, inout vec4 trap, float bias){
   float best = 1e18;
   vec3 bq = p;
