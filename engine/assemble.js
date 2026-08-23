@@ -12,7 +12,7 @@
 import { PRELUDE, VS } from './prelude.js';
 import { HELPERS } from './helpers.js';
 import { OPS, discIdx, fnName, bankCount } from './ops.js';
-import { flameKey, resolveFlame } from './flame.js';
+import { flameKey, resolveFlame, flameVars } from './flame.js';
 
 export { VS };
 
@@ -87,6 +87,10 @@ export function normalizeCfg(cfg){
     transp:   !!cfg.transp,
     flameN:   Math.max(0, Math.min(8, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
+    flameVars: cfg.flameVars || flameVars(cfg.flame),
+    flameSelect: cfg.flameSelect !== undefined
+                   ? (cfg.flameSelect ? 1 : 0)
+                   : ((cfg.flame && cfg.flame.select) ? 1 : 0),
     disp:     !!cfg.disp,
     feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
@@ -106,7 +110,7 @@ export function signature(cfg){
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
           c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces,
-          c.flameN, ops].join('|');
+          c.flameN, c.flameSelect, (c.flameVars || []).join(''), ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -144,9 +148,68 @@ export function assemble(cfgIn){
 
   const folds = cfg.stack.map(foldCall).join('\n');
 
-  // Only the transform COUNT is compiled in; the matrices arrive as uniforms so that dragging
-  // a rotate or translate slider in the transform editor costs nothing.
-  const flameSrc = `\n#define FLAME_N ${cfg.flameN}`;
+  // ── flame fold ──
+  // Emitted here rather than in ops.js because the code depends on the CONFIG: each xform's
+  // variation is compiled in (they emit different inverse code), while amounts and parameters
+  // stay uniforms so the editor sliders remain live. The loop over xforms is fully unrolled, so
+  // there is no dynamic branch and no dynamic array indexing.
+  //
+  // A flame xform is f(p) = V(affine(p)), and this path needs f inverse:
+  //     f^-1(q) = affine^-1( V^-1(q) )
+  // so each block applies the variation's inverse first and the affine inverse second.
+  const V_INV = [
+    // linear3D: V(p) = A*p
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        q = q / A; ve = 1.0 / abs(A); }`,
+    // spherical3D: an involution, so the inverse is the same map with the same amount
+    k => `      { float A = uFlameVAmt[${k}];
+        float r2 = max(dot(q, q), 1e-9);
+        q = q * (A / r2); ve = abs(A) / r2; }`,
+    // swirl: radius is preserved (up to the amount) and the angle turns by -k*r^2, so undoing
+    // it is exact — unwind the amount first, then turn the angle back by the SAME r
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float kk = uFlameVP[${k}].x;
+        vec3 u = q / A;
+        float r2 = u.x * u.x + u.y * u.y;
+        float th = kk * r2;
+        float c = cos(th), sn = sin(th);
+        q = vec3(c * u.x - sn * u.y, sn * u.x + c * u.y, u.z);
+        float cc = 2.0 * abs(kk) * r2;
+        ve = (1.0 / abs(A)) * sqrt(1.0 + cc * cc * 0.5 + cc * sqrt(1.0 + cc * cc * 0.25)); }`,
+    // radial power: rho -> A*rho^n with the direction kept, so the inverse is (rho/A)^(1/n).
+    // Radial and tangential eigenvalues differ, hence the max.
+    k => `      { float A = uFlameVAmt[${k}]; A = abs(A) < 1e-5 ? 1e-5 : A;
+        float n = uFlameVP[${k}].y; n = abs(n) < 0.05 ? (n < 0.0 ? -0.05 : 0.05) : n;
+        float r = max(length(q), 1e-9);
+        float rin = pow(max(r / abs(A), 1e-12), 1.0 / n);
+        q = q * (rin / r);
+        float tang = rin / r;
+        float radial = abs(rin / (n * r));
+        ve = max(tang, radial); }`
+  ];
+
+  const flameBlocks = (cfg.flameVars || []).slice(0, cfg.flameN).map((v, k) => `
+    {
+      vec3 q = p;
+      float ve = 1.0;
+${(V_INV[v] || V_INV[0])(k)}
+      q = uFlameMi[${k}] * q + uFlameTi[${k}];
+      float ex = ve * uFlameEx[${k}];
+      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
+      float d = dot(dv, dv) * bias;
+      if(d < best){ best = d; bq = q; bex = ex; }
+    }`).join('');
+
+  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? `
+vec3 flameFold(vec3 p, inout float s, inout vec4 trap, float bias){
+  float best = 1e18;
+  vec3 bq = p;
+  float bex = 1.0;
+${flameBlocks}
+  s *= bex;
+  trap = min(trap, vec4(abs(bq), dot(bq, bq)));
+  return bq;
+}` : '');
 
   // The IFS contraction, plus optional ESCAPE-TIME feedback.
   //
