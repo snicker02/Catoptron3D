@@ -232,6 +232,20 @@ survivors differ only for an xform with non-diagonal blocks in TWO planes at onc
 case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
 import ever comes out visibly wrong.
 
+**The transform editor.** Flame IFS has its own tab beside the fold stack, with a card per
+transform: enable, duplicate, delete, and per-transform scale / rotate XYZ / move XYZ. Each card
+shows its resolved contraction and flags any transform that has reached 1.0, because a
+non-contractive map has no bounded attractor and renders as noise.
+
+Edits are **non-destructive**: an xform keeps its imported affine and layers the offsets on top,
+so *reset edits* restores the file exactly and a preset records what you changed rather than a
+flattened matrix. You can also build an IFS by hand — *+ transform* starts from a plain 0.5
+contraction, no file needed.
+
+The matrices are **uniforms, not baked constants**, so dragging a transform slider costs nothing.
+Only the transform COUNT is compiled in, which means adding, deleting or disabling one rebuilds
+and everything else is live.
+
 **Map selection is a heuristic, and it is exposed.** The exact rule would be "the inverse of the
 map whose image contains p", which has no closed form for a general affine IFS. `Select` offers
 *nearest image* (apply every inverse, keep the one landing closest to the origin) and *nearest
