@@ -579,9 +579,24 @@ function applyStarter(name){
 
 // Flames that ship with the app. They live as real .flame files in examples/ so they double as
 // import test material; the panel just fetches them.
+// Each entry may carry the view settings that make it look right on load. Without them an
+// import lands on generic defaults and a perfectly good flame can render as a speck.
 const EXAMPLE_FLAMES = [
-  ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame'],
-  ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame']
+  ['Flame IFS base', 'examples/flame-ifs-base.flame', {
+    prim: 2, primStyle: 0, primSize: 0.6, iters: 12, ifsScale: 1.0,
+    ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.15, eps: 0.0003,
+    bounces: 0, reflect: 0.55, ao: 1.0, fog: 0.35,
+    camDist: 5.25, camAzim: -1.434, camElev: -0.565, fov: 1.3,
+    palette: 0, trapScale: 0.55, trapShift: 0.12, exposure: 1.25, renderScale: 0.7
+  }],
+  ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
+    prim: 2, primSize: 0.07, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
+    steps: 384, stepScale: 0.85, eps: 0.0003, camDist: 3.2, camAzim: 0.9, camElev: 0.22
+  }],
+  ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame', {
+    prim: 2, primSize: 0.05, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
+    steps: 384, stepScale: 0.85, eps: 0.0004, camDist: 3.4, camAzim: 0.9, camElev: 0.9
+  }]
 ];
 
 // Opening the Flame tab with nothing loaded shows an empty editor, which reads as broken. So
@@ -593,14 +608,14 @@ function autoLoadFlame(){
   if(flameAutoTried || state.flame) return;
   flameAutoTried = true;
   const e = EXAMPLE_FLAMES[0];
-  loadExampleFlame(e[1], e[0]);
+  loadExampleFlame(e[1], e[0], e[2]);
 }
 
-async function loadExampleFlame(path, label){
+async function loadExampleFlame(path, label, settings){
   try {
     const r = await fetch('./' + path, { cache: 'no-cache' });
     if(!r.ok) throw new Error('HTTP ' + r.status);
-    loadFlameText(await r.text(), label);
+    loadFlameText(await r.text(), label, settings);
   } catch(e){
     console.error(e);
     setStat('could not load example (' + e.message + ') \u2014 serve the folder over http');
@@ -730,12 +745,13 @@ function ensureFlameOp(){
   renderStack();
 }
 
-function loadFlameText(text, label){
+function loadFlameText(text, label, settings){
   try {
     const f = parseFlame(text);
     flameAutoTried = true;
     state.flame = f;
     ensureFlameOp();
+    if(settings) Object.assign(state, settings);
     renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
     if(f.warnings.length){
       console.warn('[catoptron3d] flame import:\n  ' + f.warnings.join('\n  '));
@@ -1268,7 +1284,7 @@ function buildPanel(){
   });
   $('flameLoadEx').onclick = () => {
     const e = EXAMPLE_FLAMES[parseInt(exSel.value, 10) || 0];
-    if(e) loadExampleFlame(e[1], e[0]);
+    if(e) loadExampleFlame(e[1], e[0], e[2]);
   };
   $('flameFile').addEventListener('change', e => {
     const f = e.target.files[0];
