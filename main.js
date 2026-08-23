@@ -13,7 +13,7 @@ import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
-         FLAME_VARIATIONS, flameVars } from './engine/flame.js';
+         FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP } from './engine/flame.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -326,7 +326,10 @@ function renderScene(w, h){
     put('uFlameFp', 3, m => m.fp, (loc, b) => gl.uniform3fv(loc, b));
     put('uFlameEx', 1, m => [m.expand], (loc, b) => gl.uniform1fv(loc, b));
     put('uFlameVAmt', 1, m => [m.vamt], (loc, b) => gl.uniform1fv(loc, b));
-    put('uFlameVP', 2, m => m.vp, (loc, b) => gl.uniform2fv(loc, b));
+    // 12 parameter slots per xform, across three vec4 arrays
+    put('uFlameVP', 4, m => m.vp.slice(0, 4),  (loc, b) => gl.uniform4fv(loc, b));
+    put('uFlameVQ', 4, m => m.vp.slice(4, 8),  (loc, b) => gl.uniform4fv(loc, b));
+    put('uFlameVR', 4, m => m.vp.slice(8, 12), (loc, b) => gl.uniform4fv(loc, b));
   }
   u1(L, 'uSeed', state.seed);
   u1(L, 'uXShards', state.xShards);
@@ -672,12 +675,13 @@ function renderXforms(){
                          v => { x.vari = v; renderXforms(); pushHistory(); }, true));
     card.append(mkSlider('Var amount', -3, 3, 0.005, x.vamt,
                          v => { x.vamt = v; touchXform(); }, 3));
-    const vp1 = FLAME_VARIATIONS[x.vari] && FLAME_VARIATIONS[x.vari].p1;
-    if(vp1){
-      const idx = vp1[0] === 'Power' ? 1 : 0;
-      card.append(mkSlider(vp1[0], vp1[1], vp1[2], vp1[3], x.vp[idx],
-                           v => { x.vp[idx] = v; touchXform(); }, 3));
-    }
+    // only the selected variation's own parameters are shown; slots are fixed, so a value set
+    // for one variation is still there if you switch back
+    const spec = FLAME_VARIATIONS[x.vari];
+    (spec ? spec.params : []).forEach(([slot, label, mn, mx, st]) => {
+      card.append(mkSlider(label, mn, mx, st, x.vp[slot],
+                           v => { x.vp[slot] = v; touchXform(); }, 3));
+    });
     card.append(mkSlider('Scale', 0.05, 2, 0.005, x.scale, v => { x.scale = v; touchXform(); }, 3));
     ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
       mkSlider('Rotate ' + ax + '\u00b0', -180, 180, 0.5, x.rot[k],
@@ -1175,6 +1179,12 @@ function buildGlobals(){
     fg.append(mkSelect('Map selection', ['nearest image', 'nearest fixed point'],
                        (state.flame && state.flame.select) ? 1 : 0,
                        v => { if(state.flame) state.flame.select = v; }, true));
+    const sn = document.createElement('p');
+    sn.className = 'note';
+    sn.textContent = 'Inversive variations (spherical3D, mobius3D) want NEAREST FIXED POINT. '
+      + 'Under nearest image they collapse distant points onto the inversion centre, the same '
+      + 'map always wins, and the parameters stop having any visible effect.';
+    fg.append(sn);
     fg.append(mkSlider('Iterations', 1, 24, 1, state.iters, v => { state.iters = v; }, 0));
     fg.append(mkSlider('Primitive size', 0.002, 0.6, 0.002, state.primSize,
                        v => { state.primSize = v; }, 3));
