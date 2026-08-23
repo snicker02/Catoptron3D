@@ -322,16 +322,71 @@ affine; switching layers the new variation on top, which is flame semantics: `f(
 BACKWARDS, so a variation needs a closed-form **inverse** — a far stricter requirement than the
 fold stack, which only needs a Jacobian norm. Four qualify, all verified to round-trip exactly:
 
-| variation | inverse |
-|---|---|
-| linear3D | `q/A` |
-| spherical3D | itself — an involution |
-| swirl | radius is preserved, so unwind the amount then turn the angle back by the same r |
-| radial power | `(rho/A)^(1/n)` |
+**Twenty-two qualify**, and the count was nearly a third of that until one observation changed
+it: **a principal branch is a true right inverse even when the forward map is many-to-one.**
+`sin(asin z) == z` identically. Since the backward path only ever needs `V(V^-1(q)) == q`, the
+whole complex-analytic family JWildfire ships — the "complex vars by cothe" set named in
+`ExpFunc` itself — is eligible.
 
-The rest of the `V:` fold-stack variations cannot come here: `sinusoidal`, `cylinder`, `waves`
-and `pdj` are many-to-one; `bubble`'s image is bounded by its amount so points outside it have no
-preimage at all; `hyperbolic` and `curl` invert to a quadratic with an ambiguous branch.
+Each inverse was checked numerically for exactly that property before any GLSL was written; all
+round-trip to about 1e-14. And because these maps are conformal, `|g'| = 1/|f'(g(q))|`, verified
+to 3e-8 — so each variation needs only its FORWARD derivative. Twelve hand-derived inverse
+derivatives would have been twelve chances to be subtly wrong.
+
+| variation | inverse | note |
+|---|---|---|
+| linear3D | `q/A` | |
+| spherical3D | itself | an involution |
+| swirl | unwind the amount, turn the angle back by the same r | radius is preserved |
+| radial power | `(rho/A)^(1/n)` | |
+| exp | principal log | exp is many-to-one FORWARD, but log is a true right inverse |
+| log | exp | the mirror image of the above |
+| unpolar | log | exp with the axes swapped |
+| polar | inverse polar | needs `r > 0`; below that there is no preimage and the map reports a huge distance so another is chosen |
+| zscale | `z/A` | JWildfire's zscale only writes z, so alone it would collapse a dimension — this is the standard `linear3D + zscale` pairing |
+| zcone | subtract the cone | same pairing |
+| sin, cos, tan | asin, acos, atan | principal branch |
+| sinh, cosh, tanh | asinh, acosh, atanh | principal branch |
+| sec, csc, cot | acos/asin/atan of the reciprocal | principal branch |
+| sech, csch, coth | acosh/asinh/atanh of the reciprocal | principal branch |
+| mobius3D | undo translate, scale and rotation, then invert about the centre again | a true 3D Mobius; 10 parameters |
+
+**On the scale of this.** JWildfire ships several hundred variations. The fold stack could take
+most of them — it needs only a Jacobian norm, so what limits that side is work per variation, not
+mathematics. The xform level is the genuinely restricted one, and the table above is the honest
+extent of it: affine-like maps, radial monotone maps, and conformal maps with principal inverses.
+
+**What was rejected, and why** — the reason is always structural:
+
+| variation | why not |
+|---|---|
+| sinusoidal, cylinder, waves, pdj | many-to-one, no inverse |
+| bubble, hemisphere | `hemisphere` ignores its z input entirely, so its Jacobian is singular; `bubble`'s image is bounded by its amount |
+| hyperbolic, curl3D | inverse is a coupled quadratic with an ambiguous branch |
+| julia3D | picks a branch at random — stochastic, not a map |
+| mobius | invertible AND conformal, but needs 8 coefficients; an xform carries 2 |
+
+**mobius3D, and why it is not `mobiq`.** Every orientation-preserving Mobius transformation of
+R^3 that is not a similarity factors as `T(p) = b + lambda*R*(p - a)/|p - a|^2` — invert about a
+centre, then rotate, scale and translate. Ten parameters, every step closed form, verified exact
+both ways and conformal to 1e-8, with norm exactly `1/(lambda*|u|^2)`.
+
+JWildfire's `mobiq` is a quaternion Mobius, and at first glance the better candidate. It is not:
+it computes four components of `N*conj(D)` and **discards the k one** (measured mean magnitude
+1.03, so it is not incidentally zero). That makes it a projection of R^4 onto R^3 rather than a
+bijection of R^3 — inverting it would mean recovering the component it threw away, and there is
+no closed form for that. Mobiq can only ever be a fold. mobius3D is invertible and is the better
+map for this tool anyway.
+
+**Inversive variations want `nearest fixed point`.** Under `nearest image`, an inversion collapses
+distant points onto its centre, so the same map wins the selection every time and the parameters
+stop having any visible effect — measured as literally identical frames across wildly different
+settings. Switching selection mode makes the same parameters change the image completely. This
+applies to `spherical3D` and `mobius3D`.
+
+**Parameter storage.** Variations draw from a shared 12-slot store, with each variation's
+parameters pinned to explicit slots that are never reused. Switching a variation therefore cannot
+silently reinterpret a value set for a different one, and switching back finds it unchanged.
 
 The variation TYPE is compiled in (each emits different inverse code) so swapping one rebuilds,
 while its amount and parameter are uniforms and stay live. **Map selection** moved out of the
