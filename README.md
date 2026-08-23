@@ -295,7 +295,9 @@ case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing 
 import ever comes out visibly wrong.
 
 **Bundled examples.** The Flame tab has a picker for the flames in `examples/`, and opening the
-tab for the first time loads the first of them. They are fetched the same way the help panel
+tab for the first time loads the first of them — currently **Flame IFS base**. Each entry carries
+the view settings that make it look right on load; without them an import lands on generic
+defaults and a perfectly good flame can render as a speck. They are fetched the same way the help panel
 reads `README.md`, so — like the README — **the `examples/` folder has to be deployed** for them
 to load.
 
