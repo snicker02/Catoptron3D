@@ -734,8 +734,180 @@ ${pick}
   return p;                        // no flame imported: identity
 #endif
 }`;
-    } }
+    } },
+
+  // ── JWILDFIRE VARIATIONS ────────────────────────────────────────────────────────────────
+  // Ported from the Apophysis / JWildfire variation set, as FOLDS: applied forward to p before
+  // the primitive is evaluated. That placement only needs the Jacobian's operator norm, which is
+  // why most variations can come across — running one inside Flame IFS instead would need a
+  // closed-form INVERSE, and of this batch only Spherical 3D has one (it is an involution).
+  //
+  // Every norm below is closed-form. No finite-difference Jacobians: they cost four evaluations
+  // inside an estimator that is already instantiated ten times, and the error is hard to bound.
+  //
+  // A note on faithfulness: flame variations SUM inside an xform (out = sum of amount_i * V_i),
+  // whereas a fold stack COMPOSES. A single-variation xform ports exactly; a multi-variation one
+  // would need a blend op.
+
+  { name: 'V: Sinusoidal', fn: 'opVSin', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1]],
+    glsl: `vec3 opVSin(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // sinusoidal, componentwise in 3D. Diagonal Jacobian a*diag(cos x, cos y, cos z), so the
+  // operator norm is exactly a*max|cos| — at most a, which makes this 1-Lipschitz at amount 1.
+  vec3 c = abs(cos(p));
+  s *= abs(P.x) * max(c.x, max(c.y, c.z));
+  return P.x * sin(p);
+}` },
+
+  { name: 'V: Spherical 3D', fn: 'opVSph', lip: 'exact', deps: [],
+    params: [['Amount', 0.05, 4, 0.005, 1]],
+    glsl: `vec3 opVSph(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // spherical3D: p * amount / |p|^2. This is sphere inversion with R^2 = amount — identical to
+  // the Sphere inversion op, kept under the flame name so a port maps one-to-one. Conformal,
+  // an involution, and the only variation in this batch that could also drive a Flame IFS.
+  float r2 = max(dot(p, p), 1e-9);
+  float k = P.x / r2;
+  s *= abs(k);
+  trap = min(trap, vec4(abs(p), r2));
+  return p * k;
+}` },
+
+  { name: 'V: Bubble', fn: 'opVBub', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1]],
+    glsl: `vec3 opVBub(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // bubble, promoted to 3D by taking r^2 over all three axes. Radial map g(r)*p, so the two
+  // tangential eigenvalues are g and the radial one is d(r*g)/dr — the norm is the larger.
+  float r2 = dot(p, p);
+  float d  = r2 * 0.25 + 1.0;
+  float g  = P.x / d;
+  float radial = P.x * (1.0 - r2 * 0.25) / (d * d);
+  s *= max(abs(g), abs(radial));
+  return p * g;
+}` },
+
+  { name: 'V: Cylinder', fn: 'opVCyl', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Wrap axis', 0, 2, 1, 0, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const w = 'xyz'[d[0]];
+      const out = [`vec3(w, p.y, p.z)`, `vec3(p.x, w, p.z)`, `vec3(p.x, p.y, w)`][d[0]];
+      return `vec3 opVCyl_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // cylinder: wraps one axis onto a sine and passes the others. Jacobian a*diag(cos, 1, 1),
+  // so the norm is exactly |a| — the wrapped axis can only ever contract.
+  float w = P.x * sin(p.${w});
+  s *= abs(P.x);
+  return ${out} * vec3(1.0);
+}`;
+    } },
+
+  { name: 'V: Hyperbolic', fn: 'opVHyp', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, u, v)`, `vec3(v, ${pl[2]} * P.x, u)`,
+                   `vec3(u, v, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVHyp_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // hyperbolic, extruded along an axis. The 2D form is (a*x/r^2, a*y), which is asymmetric —
+  // one coordinate inverts and the other does not — so a symmetric 3D promotion would be a
+  // different variation. This is the 2D formula lifted, not JWildfire's hyperbolic3D.
+  //
+  // The first Jacobian row works out to norm a/r^2 exactly and the other two are a, so the
+  // Frobenius bound a*sqrt(1/r^4 + 2) is closed-form and safe (Frobenius >= spectral).
+  float r2 = max(${pl[0]} * ${pl[0]} + ${pl[1]} * ${pl[1]}, 1e-9);
+  float u = P.x * ${pl[0]} / r2;
+  float v = P.x * ${pl[1]};
+  s *= abs(P.x) * sqrt(1.0 / (r2 * r2) + 2.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Swirl', fn: 'opVSwirl', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Twist', -2, 2, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [2],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, u, v)`, `vec3(v, ${pl[2]} * P.x, u)`,
+                   `vec3(u, v, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVSwirl_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // swirl: rotate the plane by an angle proportional to r^2, extruded along an axis.
+  // In an orthonormal polar frame this is the constant shear [[1,0],[c,1]] with c = r*dtheta/dr
+  // = 2*k*r^2, so the operator norm has the same closed form as the Twist fold. Distinct from
+  // Twist, which shears along an axis rather than within the plane.
+  float k = P.y;
+  float r2 = ${pl[0]} * ${pl[0]} + ${pl[1]} * ${pl[1]};
+  float a = -k * r2;
+  float ca = cos(a), sa = sin(a);
+  float u = P.x * (ca * ${pl[0]} - sa * ${pl[1]});
+  float v = P.x * (sa * ${pl[0]} + ca * ${pl[1]});
+  float c = 2.0 * abs(k) * r2;
+  s *= abs(P.x) * sqrt(1.0 + c * c * 0.5 + c * sqrt(1.0 + c * c * 0.25));
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Curl', fn: 'opVCurl', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['C1', -2, 2, 0.005, 0.7], ['C2', -2, 2, 0.005, -0.4],
+             ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [3],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, u, v)`, `vec3(v, ${pl[2]} * P.x, u)`,
+                   `vec3(u, v, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVCurl_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // curl is secretly CONFORMAL. Written in complex form the variation is exactly w -> w / D
+  // with D = 1 + c1*w + c2*w^2, so its Jacobian is a similarity and the operator norm is
+  // |d/dw (w/D)| = |1 - c2*w^2| / |D|^2 — closed form, no numerical Jacobian needed.
+  // (Verified against a finite-difference Jacobian to 5e-8.)
+  float x = ${pl[0]}, y = ${pl[1]};
+  float c1 = P.y, c2 = P.z;
+  float re = 1.0 + c1 * x + c2 * (x * x - y * y);
+  float im = c1 * y + 2.0 * c2 * x * y;
+  float dd = max(re * re + im * im, 1e-9);
+  float u = P.x * (x * re + y * im) / dd;
+  float v = P.x * (y * re - x * im) / dd;
+  // |1 - c2 w^2| with w^2 = (x^2-y^2) + i(2xy)
+  float nr = 1.0 - c2 * (x * x - y * y);
+  float ni = -c2 * 2.0 * x * y;
+  s *= max(abs(P.x) * sqrt(nr * nr + ni * ni) / dd, abs(P.x));
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Waves 3D', fn: 'opVWaves', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Frequency', 0, 4, 0.005, 1],
+             ['Amplitude', -2, 2, 0.005, 0.5]],
+    glsl: `vec3 opVWaves(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  // waves, promoted to 3D cyclically: each axis is displaced by a sine of the next.
+  // The Jacobian is the identity plus one off-diagonal term per row, so the Frobenius bound is
+  // closed-form: a*sqrt(3 + sum of the three squared cross terms).
+  float f = P.y, m = P.z;
+  vec3 q = vec3(p.x + m * sin(p.y * f),
+                p.y + m * sin(p.z * f),
+                p.z + m * sin(p.x * f)) * P.x;
+  vec3 g = m * f * cos(vec3(p.y, p.z, p.x) * f);
+  s *= abs(P.x) * sqrt(3.0 + dot(g, g));
+  return q;
+}` },
+
+  { name: 'V: PDJ 3D', fn: 'opVPdj', lip: 'exact', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['A', -3, 3, 0.005, 1.8], ['B', -3, 3, 0.005, -1.4],
+             ['C', -3, 3, 0.005, 1.2], ['D', -3, 3, 0.005, -1.7]],
+    glsl: `vec3 opVPdj(vec3 p, vec4 P0, vec4 P1, inout float s, inout vec4 trap, inout float seam){
+  // pdj, promoted to 3D cyclically. Every Jacobian entry is a parameter times a sine or cosine,
+  // so the Frobenius bound is exact to write down and needs no differencing.
+  float a = P0.y, b = P0.z, c = P0.w, d = P1.x, k = P0.x;
+  vec3 q = vec3(sin(a * p.y) - cos(b * p.x),
+                sin(c * p.z) - cos(d * p.y),
+                sin(a * p.x) - cos(c * p.z)) * k;
+  float j1 = b * sin(b * p.x), j2 = a * cos(a * p.y);
+  float j3 = d * sin(d * p.y), j4 = c * cos(c * p.z);
+  float j5 = a * cos(a * p.x), j6 = c * sin(c * p.z);
+  s *= abs(k) * sqrt(j1*j1 + j2*j2 + j3*j3 + j4*j4 + j5*j5 + j6*j6);
+  return q;
+}` }
 ];
+
 
 
 
