@@ -689,52 +689,17 @@ ${fold}
 }` },
 
   { name: 'Flame IFS', fn: 'opFlame', lip: 'bound', deps: [],
-    params: [['Select', 0, 1, 1, 0, ['nearest image', 'nearest fixed point']],
-             ['Bias', 0.2, 3, 0.01, 1]],
-    disc: [0],
-    glsl: d => {
-      // Which inverse map to apply is a HEURISTIC, and there is no universally right answer.
-      // The exact rule is "the map whose image contains p", which has no closed form for a
-      // general affine IFS. Two workable proxies, exposed because different flames favour
-      // different ones: the Sierpinski example reconstructs better under nearest-image, while
-      // an IFS built as pure contractions toward scattered vertices favours nearest-fixed-point.
-      const pick = d[0] === 0 ? `
-  // nearest image: apply every inverse, keep the one landing closest to the origin
-  for(int i = 0; i < FLAME_N; i++){
-    vec3 q = uFlameMi[i] * p + uFlameTi[i];
-    float dd = dot(q, q) * P.y;
-    if(dd < best){ best = dd; bi = i; }
-  }` : `
-  // nearest fixed point: each map contracts toward its own fixed point, so those points
-  // partition space into Voronoi cells mirroring the attractor's own subdivision
-  for(int i = 0; i < FLAME_N; i++){
-    vec3 dv = (p - uFlameFp[i]) * P.y;
-    float dd = dot(dv, dv);
-    if(dd < best){ best = dd; bi = i; }
-  }`;
-      return `vec3 opFlame_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+    params: [['Bias', 0.2, 3, 0.01, 1]],
+    glsl: `vec3 opFlame(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
 #if FLAME_N > 0
-  // Runs an imported affine IFS BACKWARDS. A flame renders by chaos game — points pushed
-  // forward through randomly chosen maps — which a distance estimator cannot do. But for a
-  // contractive IFS the attractor satisfies A = union of f_i(A), so a point near A lies in some
-  // f_i(A) and f_i^-1 carries it back onto A.
-  //
-  // NO SEAM IS REPORTED. Selecting a map looks like a branch, but the selected value is a
-  // minimum of continuous functions. An earlier version clamped on the tie boundary; with
-  // several maps those boundaries are dense, the clamp collapsed to ~0 almost everywhere, and
-  // the marcher crawled instead of reaching the surface. Gate 3 is what licenses dropping it.
-  float best = 1e18;
-  int bi = 0;
-${pick}
-  vec3 bq = uFlameMi[bi] * p + uFlameTi[bi];
-  s *= uFlameEx[bi];               // f_i contracts, so its inverse expands
-  trap = min(trap, vec4(abs(bq), dot(bq, bq)));
-  return bq;
+  // The body lives in flameFold(), emitted by assemble.js, because each xform's VARIATION is
+  // compiled in and only the assembler sees the config. Selection mode is a property of the
+  // flame rather than of this slot, so it is baked there too.
+  return flameFold(p, s, trap, P.x);
 #else
   return p;                        // no flame imported: identity
 #endif
-}`;
-    } },
+}` },
 
   // ── JWILDFIRE VARIATIONS ────────────────────────────────────────────────────────────────
   // Ported from the Apophysis / JWildfire variation set, as FOLDS: applied forward to p before
