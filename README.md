@@ -62,6 +62,10 @@ A top bar and two rails.
 **Top bar:** New, pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide panels (H),
 fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
 
+The app opens on **Folded frames** — the recursive box-frame lattice — which is the first entry
+in Starters. Startup and **New** both apply that starter rather than building the state inline,
+so the thing the app opens with is always reachable again.
+
 The right rail opens on **Fold stack**. Opening the **Flame IFS** tab with nothing loaded pulls
 in the default example, once per session — an empty transform editor reads as broken. Clearing
 the flame deliberately is remembered, so coming back to the tab leaves it cleared.
@@ -308,6 +312,30 @@ contraction, no file needed.
 The matrices are **uniforms, not baked constants**, so dragging a transform slider costs nothing.
 Only the transform COUNT is compiled in, which means adding, deleting or disabling one rebuilds
 and everything else is live.
+
+**Per-xform variations.** Each transform card has a variation selector, so you can swap
+`linear3D` for `spherical3D` on one xform the way you would in a flame editor. An imported flame
+arrives as `linear3D` at amount 1, because the parser folds the file's variation amount into the
+affine; switching layers the new variation on top, which is flame semantics: `f(p) = V(affine(p))`.
+
+**The list here is deliberately short, and the reason is structural.** This path runs the maps
+BACKWARDS, so a variation needs a closed-form **inverse** — a far stricter requirement than the
+fold stack, which only needs a Jacobian norm. Four qualify, all verified to round-trip exactly:
+
+| variation | inverse |
+|---|---|
+| linear3D | `q/A` |
+| spherical3D | itself — an involution |
+| swirl | radius is preserved, so unwind the amount then turn the angle back by the same r |
+| radial power | `(rho/A)^(1/n)` |
+
+The rest of the `V:` fold-stack variations cannot come here: `sinusoidal`, `cylinder`, `waves`
+and `pdj` are many-to-one; `bubble`'s image is bounded by its amount so points outside it have no
+preimage at all; `hyperbolic` and `curl` invert to a quadratic with an ambiguous branch.
+
+The variation TYPE is compiled in (each emits different inverse code) so swapping one rebuilds,
+while its amount and parameter are uniforms and stay live. **Map selection** moved out of the
+fold slot and into the flame, where it belongs.
 
 **Map selection is a heuristic, and it is exposed.** The exact rule would be "the inverse of the
 map whose image contains p", which has no closed form for a general affine IFS. `Select` offers
