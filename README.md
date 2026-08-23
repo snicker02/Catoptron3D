@@ -263,6 +263,23 @@ multi-variation xform would need a blend op that holds several variations with w
 of JWildfire's own `*3D` variants — the 2D source is unambiguous, the 3D promotion is a choice.
 Paste the Java for a specific `*3D` variation if you want its exact behaviour instead.
 
+### The symbolic batch
+
+Eleven more fold variations — polar, disc, diamond, handkerchief, heart, spiral, exponential,
+cosine, eyefish, blob, secant — were **not hand-derived**. `tools/gen-variations.py` writes down
+the 2D core of each once, sympy differentiates it, and the GLSL in `engine/ops.js` is emitted
+from that: map and Jacobian from one source, so they cannot disagree. Each Frobenius bound was
+then checked against a numerical Jacobian over a random cloud before shipping.
+
+The gate confirms the bounds are tight rather than merely safe — the measured ratios sit between
+0.93 and 1.00, so almost no march speed is given away. Hand-deriving eleven Jacobians would have
+been eleven chances to be quietly wrong, and **a wrong norm does not throw; it punches holes in
+surfaces**.
+
+The generator also documents two things it got wrong first time: sympy's GLSL printer emits a
+`float pi = ...` declaration mid-expression, and GLSL ES 300 refuses to implicitly convert int to
+float, so bare literals like `exp(x - 1)` and `juy = 0` fail to compile.
+
 ## JWildfire flame import
 
 `import .flame` reads a JWildfire / Apophysis flame and turns it into geometry — the **linear
