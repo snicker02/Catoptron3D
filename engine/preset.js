@@ -22,9 +22,12 @@ const round = (v, dp = 6) => {
 
 // ── capture ────────────────────────────────────────────────────────────────────────────────
 export function capture(state, defaults, OPS, name = ''){
+  // `stack` and `flame` are structured; everything else in state is a number. Letting the
+  // flame fall through here wrote the entire transform list into the numeric block as well as
+  // into `f`, roughly doubling every preset that had one.
   const s = {};
   Object.keys(defaults).forEach(k => {
-    if(k === 'stack') return;
+    if(k === 'stack' || k === 'flame') return;
     if(round(state[k]) !== round(defaults[k])) s[k] = round(state[k]);
   });
   return {
@@ -78,7 +81,7 @@ export function apply(preset, defaults, OPS){
   const warnings = [];
 
   const state = {};
-  Object.keys(defaults).forEach(k => { if(k !== 'stack') state[k] = defaults[k]; });
+  Object.keys(defaults).forEach(k => { if(k !== 'stack' && k !== 'flame') state[k] = defaults[k]; });
   Object.keys(p.s || {}).forEach(k => {
     if(k in state) state[k] = p.s[k];
     else warnings.push('unknown setting "' + k + '" ignored');
