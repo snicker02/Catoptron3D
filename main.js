@@ -12,7 +12,7 @@ import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/as
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
-import { parseFlame } from './engine/flame.js';
+import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS } from './engine/flame.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -182,7 +182,7 @@ function currentCfg(){
   return {
     stack:  state.stack.map(sl => ({ type: sl.type, p: sl.p.slice() })),
     prim:   state.prim,
-    flame:  state.flame,
+    flameN: resolveFlame(state.flame).length,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -291,6 +291,38 @@ function renderScene(w, h){
   const bg = P.bg || DARK;
   u3(L, 'uBgTop', bg[0][0], bg[0][1], bg[0][2]);
   u3(L, 'uBgBot', bg[1][0], bg[1][1], bg[1][2]);
+  // Uniform ARRAYS are uploaded whole, at the [0] location.
+  //
+  // WebGL enumerates an array as a single active uniform named "uFlameMi[0]" — the other
+  // indices are simply not in the list. Looking up "uFlameMi[1]" in the cached location map
+  // silently returns nothing, so a per-index loop would have uploaded transform 1 and quietly
+  // dropped the rest. Passing a longer array to the [0] location fills consecutive elements.
+  // Uniform ARRAYS are uploaded whole, at the [0] location, and at exactly their ACTIVE length.
+  //
+  // Two traps here, both silent. WebGL enumerates an array as a single active uniform named
+  // "uFlameMi[0]" — the other indices are not in the list at all, so a per-index location lookup
+  // would upload transform 1 and quietly drop the rest. And the driver trims each array
+  // INDEPENDENTLY to the highest index that array is actually indexed with, so uFlameFp can come
+  // back shorter than uFlameMi; uploading more than that is an error, not a harmless overrun.
+  const fm = resolveFlame(state.flame);
+  if(fm.length){
+    const sizes = cur.sizes || {};
+    const put = (nm, per, pick, setter) => {
+      const loc = L[nm + '[0]'];
+      if(!loc) return;
+      const n = sizes[nm + '[0]'] || fm.length;
+      const buf = new Float32Array(n * per);
+      for(let i = 0; i < Math.min(n, fm.length); i++) buf.set(pick(fm[i]), i * per);
+      setter(loc, buf);
+    };
+    put('uFlameMi', 9, m => {
+      const I = m.Mi;                                  // row-major -> column-major
+      return [I[0], I[3], I[6], I[1], I[4], I[7], I[2], I[5], I[8]];
+    }, (loc, b) => gl.uniformMatrix3fv(loc, false, b));
+    put('uFlameTi', 3, m => m.Ti, (loc, b) => gl.uniform3fv(loc, b));
+    put('uFlameFp', 3, m => m.fp, (loc, b) => gl.uniform3fv(loc, b));
+    put('uFlameEx', 1, m => [m.expand], (loc, b) => gl.uniform1fv(loc, b));
+  }
   u1(L, 'uSeed', state.seed);
   u1(L, 'uXShards', state.xShards);
   u1(L, 'uXFacets', state.xFacets);
@@ -525,32 +557,125 @@ function applyStarter(name){
 function refreshFlameLabel(){
   const e = $('flameName');
   if(!e) return;
+  const n = resolveFlame(state.flame).length;
   e.textContent = state.flame
-    ? state.flame.name + ' \u00b7 ' + state.flame.maps.length + ' maps'
-    : 'no flame imported';
+    ? state.flame.name + ' \u00b7 ' + n + ' active of ' + state.flame.maps.length
+    : 'no flame \u2014 import one, or add a transform to build by hand';
+}
+
+/* ── flame transform editor ────────────────────────────────────────────────────────────────
+   One card per xform. Each keeps its IMPORTED affine untouched and layers scale / rotate /
+   translate on top, so "reset edits" restores the file exactly and a preset records the edits
+   rather than a flattened matrix. The matrices are uniforms, so none of these sliders rebuild
+   the shader — only adding, removing or disabling a transform does, because the COUNT is
+   compiled in.                                                                              */
+function renderXforms(){
+  const host = $('xforms');
+  if(!host) return;
+  host.innerHTML = '';
+  const fl = state.flame;
+  if(!fl || !fl.maps.length){
+    host.innerHTML = '<p class="empty">No transforms. Import a .flame, or press ' +
+                     '<b>+ transform</b> to start from a plain 0.5 contraction.</p>';
+    return;
+  }
+
+  fl.maps.forEach((x, i) => {
+    const r = resolveXform(x);
+    const card = document.createElement('div');
+    card.className = 'xf' + (x.on === false ? ' off' : '');
+
+    const head = document.createElement('div');
+    head.className = 'xfhead';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = 'T' + (i + 1);
+    const sc = document.createElement('span');
+    sc.className = 'sc';
+    // a map at or above 1.0 cannot converge; say so rather than let it render as noise
+    sc.textContent = r ? (r.scale < 0.999 ? '\u00d7' + r.scale.toFixed(3)
+                                          : '\u00d7' + r.scale.toFixed(3) + ' not contractive')
+                       : 'singular';
+    if(r && r.scale >= 0.999) sc.style.color = 'var(--warn1)';
+    head.append(nm, sc);
+    head.append(
+      mkBtn(x.on === false ? '\u25cb' : '\u25c9', () => {
+        x.on = x.on === false; renderXforms(); refreshFlameLabel(); pushHistory();
+      }),
+      mkBtn('\u29c9', () => {
+        if(fl.maps.length >= MAX_XFORMS){ setStat('8 transforms is the limit'); return; }
+        fl.maps.splice(i + 1, 0, JSON.parse(JSON.stringify(x)));
+        renderXforms(); refreshFlameLabel(); pushHistory();
+      }),
+      mkBtn('\u00d7', () => {
+        fl.maps.splice(i, 1);
+        if(!fl.maps.length) state.flame = null;
+        renderXforms(); refreshFlameLabel(); pushHistory();
+      })
+    );
+    card.append(head);
+
+    card.append(mkSlider('Scale', 0.05, 2, 0.005, x.scale, v => { x.scale = v; touchXform(); }, 3));
+    ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
+      mkSlider('Rotate ' + ax + '\u00b0', -180, 180, 0.5, x.rot[k],
+               v => { x.rot[k] = v; touchXform(); }, 1)));
+    ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
+      mkSlider('Move ' + ax, -2, 2, 0.005, x.tr[k],
+               v => { x.tr[k] = v; touchXform(); }, 3)));
+    host.append(card);
+  });
+}
+
+// A slider edit changes uniforms only; just refresh the contraction readouts.
+function touchXform(){
+  const fl = state.flame;
+  if(!fl) return;
+  document.querySelectorAll('#xforms .xf .sc').forEach((el, i) => {
+    const r = resolveXform(fl.maps[i]);
+    if(!r){ el.textContent = 'singular'; return; }
+    el.textContent = '\u00d7' + r.scale.toFixed(3) + (r.scale < 0.999 ? '' : ' not contractive');
+    el.style.color = r.scale < 0.999 ? '' : 'var(--warn1)';
+  });
+}
+
+function addXform(){
+  if(!state.flame) state.flame = { name: 'hand-built', maps: [] };
+  if(state.flame.maps.length >= MAX_XFORMS){ setStat('8 transforms is the limit'); return; }
+  state.flame.maps.push(identityXform());
+  ensureFlameOp();
+  renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+}
+
+function resetXformEdits(){
+  if(!state.flame) return;
+  state.flame.maps.forEach(x => { x.scale = 1; x.rot = [0, 0, 0]; x.tr = [0, 0, 0]; x.on = true; });
+  renderXforms(); refreshFlameLabel(); pushHistory();
+  setStat('edits reset to the imported flame');
+}
+
+// A flame with no Flame IFS fold in the stack renders nothing, which reads as a broken import.
+function ensureFlameOp(){
+  if(state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')) return;
+  const i = OPS.findIndex(o => o.name === 'Flame IFS');
+  state.stack = [newSlot(i)];
+  state.iters = 8; state.ifsScale = 1.0; state.prim = 2;
+  state.primSize = 0.07; state.eps = 0.0003; state.steps = 384;
+  renderStack();
 }
 
 function loadFlameText(text, label){
   try {
     const f = parseFlame(text);
     state.flame = f;
-    if(!state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')){
-      const i = OPS.findIndex(o => o.name === 'Flame IFS');
-      state.stack = [newSlot(i)];                 // an imported flame with no fold does nothing
-      state.iters = 10;
-      state.ifsScale = 1.0;
-      state.prim = 2;
-      state.primSize = 0.006;
-      state.eps = 0.00025;
-      state.steps = 256;
-    }
-    renderStack(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+    ensureFlameOp();
+    renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
     if(f.warnings.length){
       console.warn('[catoptron3d] flame import:\n  ' + f.warnings.join('\n  '));
       setStat(f.maps.length + ' maps \u00b7 ' + f.warnings.length + ' skipped \u2014 see console');
     } else {
-      setStat('imported ' + label + ' \u00b7 ' + f.maps.length + ' maps');
+      setStat('imported ' + label + ' \u00b7 ' + f.maps.length + ' transforms');
     }
+    showTab('flame');
   } catch(e){
     console.error(e);
     setStat('flame import failed: ' + e.message);
@@ -560,8 +685,16 @@ function loadFlameText(text, label){
 function clearFlame(){
   state.flame = null;
   state.stack = state.stack.filter(sl => OPS[sl.type].name !== 'Flame IFS');
-  renderStack(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+  renderStack(); renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
   setStat('flame cleared');
+}
+
+function showTab(which){
+  const fold = which === 'fold';
+  $('paneFold').style.display  = fold ? '' : 'none';
+  $('paneFlame').style.display = fold ? 'none' : '';
+  $('tabFold').classList.toggle('on', fold);
+  $('tabFlame').classList.toggle('on', !fold);
 }
 
 /* ── top bar ───────────────────────────────────────────────────────────────────────────────
@@ -724,6 +857,7 @@ function loadPreset(p){
   Object.assign(state, r.state);
   state.stack = r.stack;
   state.flame = r.flame || null;
+  renderXforms();
   refreshFlameLabel();
   renderStack();
   rebuildGlobals();
@@ -969,6 +1103,13 @@ function rebuildGlobals(){
 function buildGlobals(){
   const host  = $('globals');
   const hostR = $('globalsR');
+  const fg = $('flameGlobals');
+  if(fg){
+    fg.innerHTML = '';
+    fg.append(mkSlider('Iterations', 1, 24, 1, state.iters, v => { state.iters = v; }, 0));
+    fg.append(mkSlider('Primitive size', 0.002, 0.6, 0.002, state.primSize,
+                       v => { state.primSize = v; }, 3));
+  }
 
   // primitive + march steps + palette (discrete: they rebuild)
   const g0 = section('Renderer');
@@ -1034,8 +1175,12 @@ function buildPanel(){
   $('imgClear').onclick = clearImage;
   refreshImgLabel();
 
+  $('tabFold').onclick    = () => showTab('fold');
+  $('tabFlame').onclick   = () => showTab('flame');
   $('flameBtn').onclick   = () => $('flameFile').click();
   $('flameClear').onclick = clearFlame;
+  $('flameAdd').onclick   = addXform;
+  $('flameReset').onclick = resetXformEdits;
   $('flameFile').addEventListener('change', e => {
     const f = e.target.files[0];
     if(!f) return;
@@ -1043,6 +1188,7 @@ function buildPanel(){
     rd.onload = () => loadFlameText(rd.result, f.name);
     rd.readAsText(f);
   });
+  renderXforms();
   refreshFlameLabel();
 
   $('presetSave').onclick   = savePreset;
