@@ -870,7 +870,387 @@ ${fold}
   float j5 = a * cos(a * p.x), j6 = c * sin(c * p.z);
   s *= abs(k) * sqrt(j1*j1 + j2*j2 + j3*j3 + j4*j4 + j5*j5 + j6*j6);
   return q;
-}` }
+}` },
+
+  // ── JWILDFIRE VARIATIONS, SYMBOLIC BATCH ────────────────────────────────────────────────
+  // These eleven were not hand-derived. The 2D core of each was written down from the classic
+  // Apophysis / JWildfire definition, then sympy differentiated it, common-subexpression pass
+  // and all, and emitted the GLSL below — map and Jacobian from the SAME source, so they cannot
+  // disagree. Each Frobenius bound was then checked against a numerical Jacobian over a random
+  // cloud and confirmed to dominate the true operator norm.
+  //
+  // Hand-deriving eleven Jacobians would have been eleven chances to be quietly wrong, and a
+  // wrong norm does not throw — it punches holes in surfaces.
+  { name: 'V: Polar', fn: 'opVPolar', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVPolar_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0) + pow(y, 2.0);
+  float x1 = sqrt(x0);
+  float x2 = 0.318309886183791/x0;
+  float x3 = 1.0/x1;
+  float ou = 0.318309886183791*atan(y, x);
+  float ov = x1 - 1.0;
+  float jux = -x2*y;
+  float juy = x*x2;
+  float jvx = x*x3;
+  float jvy = x3*y;
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Disc', fn: 'opVDisc', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVDisc_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0) + pow(y, 2.0);
+  float x1 = 3.14159265358979*sqrt(x0);
+  float x2 = sin(x1);
+  float x3 = atan(y, x);
+  float x4 = 0.318309886183791*x3;
+  float x5 = cos(x1);
+  float x6 = sqrt(x0);
+  float x7 = x2*x6;
+  float x8 = 3.14159265358979*x0*x3;
+  float x9 = x5*x8;
+  float x10 = 0.318309886183791*pow(x0, -1.5);
+  float x11 = x5*x6;
+  float x12 = x2*x8;
+  float ou = x2*x4;
+  float ov = x4*x5;
+  float jux = x10*(x*x9 - x7*y);
+  float juy = x10*(x*x7 + x9*y);
+  float jvx = -x10*(x*x12 + x11*y);
+  float jvy = x10*(x*x11 - x12*y);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Diamond', fn: 'opVDiamond', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVDiamond_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0);
+  float x1 = pow(y, 2.0);
+  float x2 = x0 + x1;
+  float x3 = sqrt(x2);
+  float x4 = 1.0/x3;
+  float x5 = sqrt(x2);
+  float x6 = cos(x5);
+  float x7 = sin(x5);
+  float x8 = x3*x7;
+  float x9 = x*pow(x2, -1.5)*y;
+  float x10 = pow(x, 4.0);
+  float x11 = pow(y, 4.0);
+  float x12 = x0*x1;
+  float x13 = 1.0/(x10 + x11 + 2.0*x12);
+  float x14 = x3*x6;
+  float ou = x4*x6*y;
+  float ov = x*x4*x7;
+  float jux = -x9*(x6 + x8);
+  float juy = -x13*(-x0*x14 + x11*x7 + x12*x7);
+  float jvx = x13*(x1*x8 + x10*x6 + x12*x6);
+  float jvy = x9*(x14 - x7);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Handkerchief', fn: 'opVHandkerchief', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVHandkerchief_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0) + pow(y, 2.0);
+  float x1 = sqrt(x0);
+  float x2 = atan(y, x);
+  float x3 = sqrt(x0);
+  float x4 = x2 + x3;
+  float x5 = sin(x4);
+  float x6 = -x2 + x3;
+  float x7 = cos(x6);
+  float x8 = 1.0/x1;
+  float x9 = cos(x4);
+  float x10 = x9*y;
+  float x11 = x*x9;
+  float x12 = sin(x6);
+  float x13 = x12*y;
+  float x14 = x*x12;
+  float ou = x1*x5;
+  float ov = x1*x7;
+  float jux = x8*(x*x5 + x1*x11 - x10);
+  float juy = x8*(x1*x10 + x11 + x5*y);
+  float jvx = -x8*(-x*x7 + x1*x14 + x13);
+  float jvy = x8*(-x1*x13 + x14 + x7*y);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Heart', fn: 'opVHeart', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVHeart_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0) + pow(y, 2.0);
+  float x1 = sqrt(x0);
+  float x2 = atan(y, x);
+  float x3 = sqrt(x0)*x2;
+  float x4 = sin(x3);
+  float x5 = x1*x4;
+  float x6 = cos(x3);
+  float x7 = x1*x6;
+  float x8 = 1.0/x1;
+  float x9 = x*x2 - y;
+  float x10 = x + x2*y;
+  float ou = x5;
+  float ov = -x7;
+  float jux = x8*(x*x4 + x7*x9);
+  float juy = x8*(x10*x7 + x4*y);
+  float jvx = -x8*(x*x6 - x5*x9);
+  float jvy = -x8*(-x10*x5 + x6*y);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Spiral', fn: 'opVSpiral', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVSpiral_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0);
+  float x1 = pow(y, 2.0);
+  float x2 = x0 + x1;
+  float x3 = 1.0/x2;
+  float x4 = sqrt(x2);
+  float x5 = sqrt(x2);
+  float x6 = sin(x5);
+  float x7 = x4*x6;
+  float x8 = x + x7;
+  float x9 = cos(x5);
+  float x10 = x4*x9;
+  float x11 = -x10 + y;
+  float x12 = pow(x2, -2.0);
+  float ou = x3*x8;
+  float ov = x11*x3;
+  float jux = -x12*(x*x8 + x0 - x2*(x*x9 + 1.0));
+  float juy = -x12*y*(2.0*x - x2*x9 + x7);
+  float jvx = x*x12*(x10 + x2*x6 - 2.0*y);
+  float jvy = -x12*(x1 + x11*y - x2*(x6*y + 1.0));
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Exponential', fn: 'opVExponential', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVExponential_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = 3.14159265358979*y;
+  float x1 = exp(x - 1.0);
+  float x2 = x1*cos(x0);
+  float x3 = x1*sin(x0);
+  float ou = x2;
+  float ov = x3;
+  float jux = x2;
+  float juy = -3.14159265358979*x3;
+  float jvx = x3;
+  float jvy = 3.14159265358979*x2;
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Cosine', fn: 'opVCosine', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVCosine_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = // Not supported in GLSL:
+  // cosh
+  cosh(y);
+  float x1 = 3.14159265358979*x;
+  float x2 = cos(x1);
+  float x3 = // Not supported in GLSL:
+  // sinh
+  sinh(y);
+  float x4 = sin(x1);
+  float x5 = x0*x4;
+  float x6 = x2*x3;
+  float ou = x0*x2;
+  float ov = -x3*x4;
+  float jux = -3.14159265358979*x5;
+  float juy = x6;
+  float jvx = -3.14159265358979*x6;
+  float jvy = -x5;
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Eyefish', fn: 'opVEyefish', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVEyefish_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0);
+  float x1 = pow(y, 2.0);
+  float x2 = sqrt(x0 + x1);
+  float x3 = x2 + 1.0;
+  float x4 = 2.0/x3;
+  float x5 = 2.0/(x0*x2 + 2.0*x0 + x1*x2 + 2.0*x1 + x2);
+  float x6 = -2.0*x*y/(x2*pow(x3, 2.0));
+  float ou = x*x4;
+  float ov = x4*y;
+  float jux = x5*(x1 + x2);
+  float juy = x6;
+  float jvx = x6;
+  float jvy = x5*(x0 + x2);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Blob', fn: 'opVBlob', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVBlob_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = 6.0*atan(y, x);
+  float x1 = 0.5*sin(x0) + 0.5;
+  float x2 = pow(x, 2.0);
+  float x3 = pow(y, 2.0);
+  float x4 = x2 + x3;
+  float x5 = 1.0/x4;
+  float x6 = 3.0*cos(x0);
+  float x7 = x*x6*y;
+  float x8 = x1*x4;
+  float x9 = x5*x6;
+  float ou = x*x1;
+  float ov = x1*y;
+  float jux = -x5*(x7 - x8);
+  float juy = x2*x9;
+  float jvx = -x3*x9;
+  float jvy = x5*(x7 + x8);
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } },
+
+  { name: 'V: Secant', fn: 'opVSecant', lip: 'bound', deps: [],
+    params: [['Amount', -3, 3, 0.005, 1], ['Axis', 0, 2, 1, 2, AXIS]],
+    disc: [1],
+    glsl: d => {
+      const pl = [['p.y', 'p.z', 'p.x'], ['p.z', 'p.x', 'p.y'], ['p.x', 'p.y', 'p.z']][d[0]];
+      const out = [`vec3(${pl[2]} * P.x, ou * P.x, ov * P.x)`,
+                   `vec3(ov * P.x, ${pl[2]} * P.x, ou * P.x)`,
+                   `vec3(ou * P.x, ov * P.x, ${pl[2]} * P.x)`][d[0]];
+      return `vec3 opVSecant_${d[0]}(vec3 p, vec4 P, inout float s, inout vec4 trap, inout float seam){
+  float x = ${pl[0]}, y = ${pl[1]};
+  float x0 = pow(x, 2.0) + pow(y, 2.0);
+  float x1 = sqrt(x0);
+  float x2 = cos(x1);
+  float x3 = pow(x0, -0.5)*sin(x1)/pow(x2, 2.0);
+  float ou = x;
+  float ov = 1.0/x2;
+  float jux = 1.00000000000000;
+  float juy = 0.0;
+  float jvx = x*x3;
+  float jvy = x3*y;
+  // Frobenius bound on the 3x3 Jacobian: the 2x2 plane block plus the pass-through axis.
+  // Both the map and these partials were derived symbolically and the bound was checked
+  // against a numerical Jacobian before shipping, so it dominates the true operator norm.
+  s *= abs(P.x) * sqrt(jux*jux + juy*juy + jvx*jvx + jvy*jvy + 1.0);
+  return ${out};
+}`;
+    } }
 ];
 
 
