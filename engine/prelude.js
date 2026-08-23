@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.15.0-flame';
+export const BUILD = '0.16.0-flame-editor';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -81,6 +81,13 @@ uniform float uTexScale;
 // Global seed. Currently read only by the crystal cluster; the city hash is deliberately left
 // unseeded so that existing presets keep rendering the same city.
 uniform float uSeed;
+
+// Flame IFS transforms. Uniform arrays rather than baked constants, so editing a transform in
+// the panel is instant instead of a recompile. Only the COUNT is compiled in.
+uniform mat3  uFlameMi[8];
+uniform vec3  uFlameTi[8];
+uniform vec3  uFlameFp[8];
+uniform float uFlameEx[8];
 
 // crystal cluster primitive
 uniform float uXShards;
