@@ -701,14 +701,14 @@ ${fold}
       const pick = d[0] === 0 ? `
   // nearest image: apply every inverse, keep the one landing closest to the origin
   for(int i = 0; i < FLAME_N; i++){
-    vec3 q = FLAME_MI[i] * p + FLAME_TI[i];
+    vec3 q = uFlameMi[i] * p + uFlameTi[i];
     float dd = dot(q, q) * P.y;
     if(dd < best){ best = dd; bi = i; }
   }` : `
   // nearest fixed point: each map contracts toward its own fixed point, so those points
   // partition space into Voronoi cells mirroring the attractor's own subdivision
   for(int i = 0; i < FLAME_N; i++){
-    vec3 dv = (p - FLAME_FP[i]) * P.y;
+    vec3 dv = (p - uFlameFp[i]) * P.y;
     float dd = dot(dv, dv);
     if(dd < best){ best = dd; bi = i; }
   }`;
@@ -726,8 +726,8 @@ ${fold}
   float best = 1e18;
   int bi = 0;
 ${pick}
-  vec3 bq = FLAME_MI[bi] * p + FLAME_TI[bi];
-  s *= FLAME_EX[bi];               // f_i contracts, so its inverse expands
+  vec3 bq = uFlameMi[bi] * p + uFlameTi[bi];
+  s *= uFlameEx[bi];               // f_i contracts, so its inverse expands
   trap = min(trap, vec4(abs(bq), dot(bq, bq)));
   return bq;
 #else
