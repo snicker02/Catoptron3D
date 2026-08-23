@@ -340,11 +340,11 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
 <div id="panelR">
   <div class="ptitle">Structure</div>
   <div class="tabs" role="tablist">
-    <button id="tabFold" class="tab" role="tab">Fold stack</button>
-    <button id="tabFlame" class="tab on" role="tab">Flame IFS</button>
+    <button id="tabFold" class="tab on" role="tab">Fold stack</button>
+    <button id="tabFlame" class="tab" role="tab">Flame IFS</button>
   </div>
 
-  <div id="paneFold" style="display:none">
+  <div id="paneFold">
     <div class="group">
       <div class="row">
         <select id="addOp" aria-label="Operator to add"></select>
@@ -357,7 +357,7 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     </div>
   </div>
 
-  <div id="paneFlame">
+  <div id="paneFlame" style="display:none">
     <div class="group">
       <div class="row">
         <button id="flameBtn">import .flame</button>
