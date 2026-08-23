@@ -561,6 +561,18 @@ const EXAMPLE_FLAMES = [
   ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame']
 ];
 
+// Opening the Flame tab with nothing loaded shows an empty editor, which reads as broken. So
+// the first visit loads the default example — ONCE per session, tracked by a flag rather than
+// by "is there a flame", so that deliberately clearing it and coming back leaves it cleared.
+let flameAutoTried = false;
+
+function autoLoadFlame(){
+  if(flameAutoTried || state.flame) return;
+  flameAutoTried = true;
+  const e = EXAMPLE_FLAMES[0];
+  loadExampleFlame(e[1], e[0]);
+}
+
 async function loadExampleFlame(path, label){
   try {
     const r = await fetch('./' + path, { cache: 'no-cache' });
@@ -684,6 +696,7 @@ function ensureFlameOp(){
 function loadFlameText(text, label){
   try {
     const f = parseFlame(text);
+    flameAutoTried = true;
     state.flame = f;
     ensureFlameOp();
     renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
@@ -701,6 +714,7 @@ function loadFlameText(text, label){
 }
 
 function clearFlame(){
+  flameAutoTried = true;
   state.flame = null;
   state.stack = state.stack.filter(sl => OPS[sl.type].name !== 'Flame IFS');
   renderStack(); renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
@@ -1194,7 +1208,7 @@ function buildPanel(){
   refreshImgLabel();
 
   $('tabFold').onclick    = () => showTab('fold');
-  $('tabFlame').onclick   = () => showTab('flame');
+  $('tabFlame').onclick   = () => { showTab('flame'); autoLoadFlame(); };
   $('flameBtn').onclick   = () => $('flameFile').click();
   $('flameClear').onclick = clearFlame;
   $('flameAdd').onclick   = addXform;
@@ -1218,7 +1232,6 @@ function buildPanel(){
   });
   renderXforms();
   refreshFlameLabel();
-  showTab('flame');
 
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {
