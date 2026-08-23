@@ -62,7 +62,9 @@ A top bar and two rails.
 **Top bar:** New, pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide panels (H),
 fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
 
-The right rail opens on **Flame IFS**; the fold stack is the other tab.
+The right rail opens on **Fold stack**. Opening the **Flame IFS** tab with nothing loaded pulls
+in the default example, once per session — an empty transform editor reads as broken. Clearing
+the flame deliberately is remembered, so coming back to the tab leaves it cleared.
 
 Undo history stores captured **presets** — the same pure snapshot the preset system produces —
 so undo can never drift from what a save would record. One entry per gesture rather than per
@@ -244,9 +246,10 @@ survivors differ only for an xform with non-diagonal blocks in TWO planes at onc
 case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
 import ever comes out visibly wrong.
 
-**Bundled examples.** The Flame tab has a picker for the flames in `examples/`, fetched the same
-way the help panel reads `README.md` — so, like the README, **the `examples/` folder has to be
-deployed** for them to load.
+**Bundled examples.** The Flame tab has a picker for the flames in `examples/`, and opening the
+tab for the first time loads the first of them. They are fetched the same way the help panel
+reads `README.md`, so — like the README — **the `examples/` folder has to be deployed** for them
+to load.
 
 **The transform editor.** Flame IFS has its own tab beside the fold stack, with a card per
 transform: enable, duplicate, delete, and per-transform scale / rotate XYZ / move XYZ. Each card
