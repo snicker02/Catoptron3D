@@ -1,0 +1,6 @@
+<flame name="Square corners (linear3D)" version="JWildfire V9.10" size="800 600">
+  <xform weight="0.5" color_type="DIFFUSION" color="0.0" symmetry="0.0" linear3D="0.5" linear3D_fx_priority="0" coefs="1.0 0.0 0.0 1.0 1.0 -1.0" chaos="1.0 1.0 1.0 1.0"/>
+  <xform weight="0.5" color_type="DIFFUSION" color="0.0" symmetry="0.0" linear3D="0.5" linear3D_fx_priority="0" coefs="1.0 0.0 0.0 1.0 1.0 1.0" chaos="1.0 1.0 1.0 1.0"/>
+  <xform weight="0.5" color_type="DIFFUSION" color="0.0" symmetry="0.0" linear3D="0.5" linear3D_fx_priority="0" coefs="1.0 0.0 0.0 1.0 -1.0 1.0" chaos="1.0 1.0 1.0 1.0"/>
+  <xform weight="0.5" color_type="DIFFUSION" color="0.0" symmetry="0.0" linear3D="0.5" linear3D_fx_priority="0" coefs="1.0 0.0 0.0 1.0 -1.0 -1.0" chaos="1.0 1.0 1.0 1.0"/>
+</flame>
