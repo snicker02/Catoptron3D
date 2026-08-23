@@ -183,6 +183,22 @@ export function parseFlame(text){
 
 export const MAX_XFORMS = 8;
 
+// Variations available INSIDE an xform.
+//
+// This list is much shorter than the fold stack's, and the reason is structural rather than
+// effort: the flame path runs the maps BACKWARDS, so a variation here needs a closed-form
+// INVERSE. sinusoidal, cylinder, waves and pdj are many-to-one and have none. bubble's image is
+// bounded by its amount, so points outside it have no preimage at all. hyperbolic and curl
+// invert to a quadratic with an ambiguous branch. The four below invert exactly.
+//
+// p1 / p2 are the variation's own parameters; a null slot means the variation has none.
+export const FLAME_VARIATIONS = [
+  { name: 'linear3D',     p1: null,                       p2: null },
+  { name: 'spherical3D',  p1: null,                       p2: null },
+  { name: 'swirl',        p1: ['Twist', -3, 3, 0.005, 0.8], p2: null },
+  { name: 'radial power', p1: ['Power', -3, 3, 0.005, 2],   p2: null }
+];
+
 // An xform keeps its IMPORTED affine untouched and layers editable offsets on top, so the
 // editor is non-destructive: "reset" restores exactly what the file said, and a preset can
 // record what you changed rather than a mangled matrix.
@@ -190,6 +206,10 @@ export function makeXform(M, T, weight = 1){
   return {
     M: M.slice(), T: T.slice(),                    // base, from the file — never edited
     scale: 1, rot: [0, 0, 0], tr: [0, 0, 0],       // editable offsets
+    // An imported flame folds its variation amount into the affine at parse time, so it arrives
+    // as linear3D at amount 1. Switching to another variation layers it on top of that affine,
+    // which is flame semantics: f(p) = V(affine(p)).
+    vari: 0, vamt: 1, vp: [0.8, 2],
     on: true, weight
   };
 }
@@ -226,7 +246,11 @@ export function resolveXform(x){
     Ti: apply(Mi, T).map(v => -v),
     fp: Ai ? apply(Ai, T) : [0, 0, 0],
     scale: opNorm(M),
-    expand: opNorm(Mi)
+    expand: opNorm(Mi),
+    vari: Math.max(0, Math.min(FLAME_VARIATIONS.length - 1, x.vari | 0)),
+    vamt: isFinite(x.vamt) ? x.vamt : 1,
+    vp: [(x.vp && isFinite(x.vp[0])) ? x.vp[0] : 0.8,
+         (x.vp && isFinite(x.vp[1])) ? x.vp[1] : 2]
   };
 }
 
@@ -241,6 +265,12 @@ export function resolveFlame(flame){
 
 // Only the COUNT is baked into the shader; the matrices are uniforms, so editing a transform
 // is free rather than a recompile. That is the whole reason the editor feels live.
+// Variation TYPES are compiled in (each emits different inverse code), so they belong in the
+// signature; their amounts and parameters are uniforms and do not.
 export function flameKey(flame){
-  return String(resolveFlame(flame).length);
+  const r = resolveFlame(flame);
+  const sel = flame && flame.select ? 1 : 0;
+  return r.length + ':' + sel + ':' + r.map(m => m.vari).join('');
 }
+
+export function flameVars(flame){ return resolveFlame(flame).map(m => m.vari); }
