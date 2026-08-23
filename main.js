@@ -554,6 +554,24 @@ function applyStarter(name){
    do is run a contractive affine IFS BACKWARDS. So the LINEAR subset imports exactly and
    anything carrying a nonlinear variation is reported and skipped rather than approximated.  */
 
+// Flames that ship with the app. They live as real .flame files in examples/ so they double as
+// import test material; the panel just fetches them.
+const EXAMPLE_FLAMES = [
+  ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame'],
+  ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame']
+];
+
+async function loadExampleFlame(path, label){
+  try {
+    const r = await fetch('./' + path, { cache: 'no-cache' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    loadFlameText(await r.text(), label);
+  } catch(e){
+    console.error(e);
+    setStat('could not load example (' + e.message + ') \u2014 serve the folder over http');
+  }
+}
+
 function refreshFlameLabel(){
   const e = $('flameName');
   if(!e) return;
@@ -1181,6 +1199,16 @@ function buildPanel(){
   $('flameClear').onclick = clearFlame;
   $('flameAdd').onclick   = addXform;
   $('flameReset').onclick = resetXformEdits;
+  const exSel = $('flameExample');
+  EXAMPLE_FLAMES.forEach(([nm], i) => {
+    const o = document.createElement('option');
+    o.value = String(i); o.textContent = nm;
+    exSel.append(o);
+  });
+  $('flameLoadEx').onclick = () => {
+    const e = EXAMPLE_FLAMES[parseInt(exSel.value, 10) || 0];
+    if(e) loadExampleFlame(e[1], e[0]);
+  };
   $('flameFile').addEventListener('change', e => {
     const f = e.target.files[0];
     if(!f) return;
@@ -1190,6 +1218,7 @@ function buildPanel(){
   });
   renderXforms();
   refreshFlameLabel();
+  showTab('flame');
 
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {
