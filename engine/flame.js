@@ -76,13 +76,24 @@ export function opNorm(M){
   return Math.hypot(...apply(M, v)) / Math.hypot(...v);
 }
 
-// Variation attributes that are not part of the affine transform and not geometry we can use.
-const IGNORE = new Set(['weight', 'color', 'color_type', 'symmetry', 'material', 'material_speed',
-  'coefs', 'yzCoefs', 'zxCoefs', 'chaos', 'opacity', 'var_color', 'name',
-  'linear_fx_priority', 'colorType']);
+// Bookkeeping attributes: not variations, not geometry.
+const IGNORE = new Set(['weight', 'color', 'color_type', 'colorType', 'symmetry', 'material',
+  'material_speed', 'coefs', 'yzCoefs', 'zxCoefs', 'post', 'yzPostCoefs', 'zxPostCoefs',
+  'chaos', 'opacity', 'var_color', 'name', 'antialias_amount', 'antialias_radius',
+  'preserve_z', 'wfield_type', 'fx_priority']);
+
+// The AFFINE variation family. All of these are the identity map scaled by their amount, so
+// they compose with the affine exactly and their amounts simply add.
+//
+// `linear` only carries z when the flame sets preserve_z; `linear3D` always does. A 2D-only
+// xform collapses z, which is a singular 3D map, so z is passed through with a warning rather
+// than producing an uninvertible matrix.
+const LINEAR_VARS = ['linear', 'linear3D', 'linearT3D'];
 
 export function parseFlame(text){
   const warnings = [];
+  const preserveZ = /\bpreserve_z="1"/.test(text);
+  let flat = false;
   const nameM = /<flame[^>]*\bname="([^"]*)"/.exec(text);
   const name = nameM ? nameM[1] : 'flame';
 
@@ -94,17 +105,22 @@ export function parseFlame(text){
     const at = {};
     for(const m of attrs.matchAll(/(\w+)="([^"]*)"/g)) at[m[1]] = m[2];
 
-    // reject anything that is not a pure linear xform
+    // Reject anything outside the affine family. A variation's AMOUNT is free — it scales the
+    // affine result — so only the variation's identity matters, not its weight.
     const nonlinear = Object.keys(at).filter(k =>
-      !IGNORE.has(k) && !/_speed$|^mod_/.test(k) && k !== 'linear' && Number(at[k]) !== 0);
-    const lin = at.linear === undefined ? 0 : Number(at.linear);
+      !IGNORE.has(k) && !/_speed$|_fx_priority$|^mod_/.test(k) &&
+      !LINEAR_VARS.includes(k) && Number(at[k]) !== 0);
     if(nonlinear.length){
       warnings.push(`xform ${idx + 1} skipped: nonlinear variation(s) ${nonlinear.join(', ')}`);
       return;
     }
-    if(Math.abs(lin - 1) > 1e-9){
-      warnings.push(`xform ${idx + 1} skipped: linear weight is ${lin}, only 1.0 is affine`);
+    const k = LINEAR_VARS.reduce((acc, v) => acc + (at[v] === undefined ? 0 : Number(at[v])), 0);
+    if(!isFinite(k) || Math.abs(k) < 1e-12){
+      warnings.push(`xform ${idx + 1} skipped: no affine variation (linear / linear3D) present`);
       return;
+    }
+    if(at.linear !== undefined && at.linear3D === undefined && !preserveZ){
+      flat = true;                                  // 2D flame: z would collapse
     }
     if(!at.coefs){ warnings.push(`xform ${idx + 1} skipped: no coefs`); return; }
 
@@ -120,6 +136,27 @@ export function parseFlame(text){
       T = apply(a.M, T).map((v, i) => v + a.T[i]);
     });
 
+    // the variation amount scales the affine result
+    M = M.map(v => v * k);
+    T = T.map(v => v * k);
+
+    // POST transform, if present: flame math is affine -> variations -> post affine. Ignoring a
+    // post block would import silently wrong geometry, so it is composed rather than skipped.
+    if(at.post || at.yzPostCoefs || at.zxPostCoefs){
+      const psrc = { xy: at.post ? nums(at.post) : [1, 0, 0, 1, 0, 0],
+                     yz: at.yzPostCoefs ? nums(at.yzPostCoefs) : [1, 0, 0, 1, 0, 0],
+                     zx: at.zxPostCoefs ? nums(at.zxPostCoefs) : [1, 0, 0, 1, 0, 0] };
+      let PM = [1, 0, 0, 0, 1, 0, 0, 0, 1], PT = [0, 0, 0];
+      PLANE_ORDER.forEach(pl => {
+        const [i0, i1] = PLANES[pl];
+        const a = planeAffine(psrc[pl], i0, i1);
+        PM = mul(a.M, PM);
+        PT = apply(a.M, PT).map((v, i) => v + a.T[i]);
+      });
+      M = mul(PM, M);
+      T = apply(PM, T).map((v, i) => v + PT[i]);
+    }
+
     if(!inv3(M)){ warnings.push(`xform ${idx + 1} skipped: singular (zero determinant)`); return; }
     const sc = opNorm(M);
     if(sc >= 0.999){
@@ -129,7 +166,14 @@ export function parseFlame(text){
     maps.push(makeXform(M, T, at.weight === undefined ? 1 : Number(at.weight)));
   });
 
-  if(!maps.length) throw new Error('no usable linear xforms — this flame needs variations we cannot fold');
+  if(!maps.length){
+    const why = warnings.length ? ' (' + warnings[0] + ')' : '';
+    throw new Error('no usable affine xforms' + why);
+  }
+  if(flat){
+    warnings.push('this is a 2D flame (linear without preserve_z) — z is passed through so the ' +
+                  'attractor is planar rather than a collapsed, uninvertible map');
+  }
   if(maps.length > 8){
     warnings.push(`${maps.length} maps found; only the first 8 are used`);
     maps.length = 8;
