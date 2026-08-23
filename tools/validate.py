@@ -310,7 +310,9 @@ def gate_de():
             put('uFlameFp', 3, lambda fm: fm['fp'])
             put('uFlameEx', 1, lambda fm: [fm['expand']])
             put('uFlameVAmt', 1, lambda fm: [fm.get('vamt', 1.0)])
-            put('uFlameVP', 2, lambda fm: fm.get('vp', [0.8, 2.0]))
+            put('uFlameVP', 4, lambda fm: (fm.get('vp') or [0]*12)[0:4])
+            put('uFlameVQ', 4, lambda fm: (fm.get('vp') or [0]*12)[4:8])
+            put('uFlameVR', 4, lambda fm: (fm.get('vp') or [0]*12)[8:12])
         for i, sl in enumerate(d['stack']):
             pk = list(sl['p']) + [0.0] * 8
             nb = max(1, (len(sl['p']) + 3) // 4)
