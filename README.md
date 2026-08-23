@@ -215,6 +215,50 @@ while quietly breaking the estimator.
 The PRIMS order is part of the preset format — `state.prim` is an index — so new primitives are
 appended and existing ones never move.
 
+## JWildfire variations
+
+Variations ported from the Apophysis / JWildfire set live in the fold stack under a `V:` prefix.
+They are **folds** — applied forward to p before the primitive — and that placement is the whole
+reason most of them can come across at all.
+
+**Two placements, very different requirements.** A fold needs only the Jacobian's operator norm.
+Running a variation inside **Flame IFS** instead needs a closed-form **inverse**, because that
+path runs the maps backwards. Of the current batch only `Spherical 3D` qualifies, and only
+because it is an involution — `sinusoidal` is many-to-one and simply cannot be inverted.
+
+**Every norm below is closed-form.** No finite-difference Jacobians: they cost four extra
+evaluations inside an estimator already instantiated ten times, and the error is hard to bound.
+
+| variation | 3D form | operator norm |
+|---|---|---|
+| Sinusoidal | componentwise `sin` | exact `a*max\|cos\|` — 1-Lipschitz at amount 1 |
+| Spherical 3D | `a*p/\|p\|^2` | exact `a/r^2`; identical to Sphere inversion with R^2 = a |
+| Bubble | radial, `r^2` over all three axes | exact `max(g, d(rg)/dr)` |
+| Cylinder | wraps one axis onto a sine | exact `\|a\|` |
+| Hyperbolic | 2D form extruded | Frobenius `a*sqrt(1/r^4 + 2)` |
+| Swirl | rotate the plane by `r^2`, extruded | exact, same closed form as Twist |
+| Curl | `w -> w/(1 + c1 w + c2 w^2)` | exact `\|1 - c2 w^2\|/\|D\|^2` |
+| Waves 3D | cyclic sine displacement | Frobenius, closed-form |
+| PDJ 3D | cyclic sin/cos | Frobenius, closed-form |
+
+**Curl turned out to be conformal.** Written in complex form the 2D variation is exactly
+`w -> w/D` with `D = 1 + c1*w + c2*w^2`, so its Jacobian is a similarity and the norm is
+`|1 - c2*w^2| / |D|^2`. Verified against a finite-difference Jacobian to 5e-8. That is much
+better than bounding it numerically.
+
+**Two things worth knowing when using them.** `Spherical 3D` is an involution, so an even number
+of iterations is the identity — two passes give you back an untouched primitive, which looks like
+a bug and is not. And `Sinusoidal` is periodic, so it tiles space into an infinite lattice rather
+than deforming a single object.
+
+**Faithfulness caveat.** Flame variations SUM inside an xform (`out = sum of amount_i * V_i`),
+while a fold stack COMPOSES. A single-variation xform ports exactly; reproducing a
+multi-variation xform would need a blend op that holds several variations with weights.
+
+`Hyperbolic`, `Swirl`, `Curl`, `Waves` and `PDJ` are **my 3D lifts of the 2D formulas**, not ports
+of JWildfire's own `*3D` variants — the 2D source is unambiguous, the 3D promotion is a choice.
+Paste the Java for a specific `*3D` variation if you want its exact behaviour instead.
+
 ## JWildfire flame import
 
 `import .flame` reads a JWildfire / Apophysis flame and turns it into geometry — the **linear
