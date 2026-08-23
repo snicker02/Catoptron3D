@@ -289,6 +289,26 @@ def gate_de():
         for u, val in (('uIfsCenter', (1.0, 1.0, 1.0)), ('uIfsRot', (0.0, 0.0, 0.0))):
             if u in prog: prog[u].value = val
         if 'uPrimSize' in prog and d.get('prim') == 2: prog['uPrimSize'].value = 0.01
+        # Flame matrices are uniforms now. Without this the gate would compile a valid shader,
+        # upload nothing, and report a perfect score on an IFS containing no transforms at all.
+        fmaps = d.get('flameMaps', [])
+        if fmaps:
+            # Each array is trimmed INDEPENDENTLY by the driver to the highest index that
+            # array is actually indexed with — uFlameFp can come back as 4 while uFlameMi is 8,
+            # depending on which selection mode the shader compiled. Size each one separately.
+            def put(nm, per, pick):
+                if nm not in prog: return
+                n = prog[nm].array_length
+                buf = np.zeros(n * per, dtype='f4')
+                for i, fm in enumerate(fmaps[:n]):
+                    buf[i*per:(i+1)*per] = pick(fm)
+                prog[nm].write(buf.tobytes())
+            put('uFlameMi', 9, lambda fm: [fm['Mi'][0], fm['Mi'][3], fm['Mi'][6],
+                                           fm['Mi'][1], fm['Mi'][4], fm['Mi'][7],
+                                           fm['Mi'][2], fm['Mi'][5], fm['Mi'][8]])
+            put('uFlameTi', 3, lambda fm: fm['Ti'])
+            put('uFlameFp', 3, lambda fm: fm['fp'])
+            put('uFlameEx', 1, lambda fm: [fm['expand']])
         for i, sl in enumerate(d['stack']):
             pk = list(sl['p']) + [0.0] * 8
             nb = max(1, (len(sl['p']) + 3) // 4)
