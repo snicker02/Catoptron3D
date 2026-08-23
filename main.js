@@ -12,7 +12,8 @@ import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/as
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
-import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS } from './engine/flame.js';
+import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
+         FLAME_VARIATIONS, flameVars } from './engine/flame.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -183,6 +184,8 @@ function currentCfg(){
     stack:  state.stack.map(sl => ({ type: sl.type, p: sl.p.slice() })),
     prim:   state.prim,
     flameN: resolveFlame(state.flame).length,
+    flameVars: flameVars(state.flame),
+    flameSelect: (state.flame && state.flame.select) ? 1 : 0,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -322,6 +325,8 @@ function renderScene(w, h){
     put('uFlameTi', 3, m => m.Ti, (loc, b) => gl.uniform3fv(loc, b));
     put('uFlameFp', 3, m => m.fp, (loc, b) => gl.uniform3fv(loc, b));
     put('uFlameEx', 1, m => [m.expand], (loc, b) => gl.uniform1fv(loc, b));
+    put('uFlameVAmt', 1, m => [m.vamt], (loc, b) => gl.uniform1fv(loc, b));
+    put('uFlameVP', 2, m => m.vp, (loc, b) => gl.uniform2fv(loc, b));
   }
   u1(L, 'uSeed', state.seed);
   u1(L, 'uXShards', state.xShards);
@@ -373,6 +378,21 @@ function renderScene(w, h){
    further out through the tiling instead of shrinking. The fractal default of 1.9 collapses
    them, which makes mirror mode nearly undiscoverable without these.                        */
 const STARTERS = {
+  // The boot state. Listed FIRST and used by both startup and New, so the thing the app opens
+  // with is always reachable again — it used to be hand-built at boot and existed nowhere in
+  // this table, which meant loading any other starter lost it for good.
+  'Folded frames': {
+    stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
+    set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
+           prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
+           steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
+           bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
+           ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
+           ambient: 0.30, spec: 0.55, rim: 0.9,
+           camDist: 5.2, fov: 1.3, camAzim: 0.9, camElev: 0.35,
+           palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0,
+           sat: 1.0, exposure: 1.25, renderScale: 0.75 }
+  },
   'Mirror room': {
     stack: [{ t: 13, p: [2, 2, 2] }, { t: 14, p: [0.9, 0.9, 0.9] }],
     set: { iters: 2, ifsScale: 1.0, prim: 0, primSize: 0.62, primRound: 0.05, steps: 192,
@@ -645,6 +665,19 @@ function renderXforms(){
     );
     card.append(head);
 
+    // Variation selector — the flame-editor move: swap linear3D for spherical on one xform.
+    // Marked baked because the variation TYPE compiles in (each emits different inverse code);
+    // its amount and parameter are uniforms and stay live.
+    card.append(mkSelect('Variation', FLAME_VARIATIONS.map(v => v.name), x.vari,
+                         v => { x.vari = v; renderXforms(); pushHistory(); }, true));
+    card.append(mkSlider('Var amount', -3, 3, 0.005, x.vamt,
+                         v => { x.vamt = v; touchXform(); }, 3));
+    const vp1 = FLAME_VARIATIONS[x.vari] && FLAME_VARIATIONS[x.vari].p1;
+    if(vp1){
+      const idx = vp1[0] === 'Power' ? 1 : 0;
+      card.append(mkSlider(vp1[0], vp1[1], vp1[2], vp1[3], x.vp[idx],
+                           v => { x.vp[idx] = v; touchXform(); }, 3));
+    }
     card.append(mkSlider('Scale', 0.05, 2, 0.005, x.scale, v => { x.scale = v; touchXform(); }, 3));
     ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
       mkSlider('Rotate ' + ax + '\u00b0', -180, 180, 0.5, x.rot[k],
@@ -769,15 +802,16 @@ function syncHistButtons(){
   if(r) r.disabled = histAt >= hist.length - 1;
 }
 
+const BOOT_STARTER = 'Folded frames';
+
 function newProject(){
   if(!confirm('Start from defaults? This clears the current look.')) return;
   Object.keys(DEFAULT_STATE).forEach(k => { if(k !== 'stack') state[k] = DEFAULT_STATE[k]; });
-  state.stack = [newSlot(8), newSlot(5)];
-  state.stack[0].p = [0.42];
-  state.stack[1].p = [1.0];
+  state.flame = null;
+  applyStarter(BOOT_STARTER);
   const nb = $('presetName'); if(nb) nb.value = '';
   history.replaceState(null, '', location.pathname);
-  renderStack(); rebuildGlobals(); relayout(); pushHistory();
+  relayout(); pushHistory();
   setStat('new project');
 }
 
@@ -1138,6 +1172,9 @@ function buildGlobals(){
   const fg = $('flameGlobals');
   if(fg){
     fg.innerHTML = '';
+    fg.append(mkSelect('Map selection', ['nearest image', 'nearest fixed point'],
+                       (state.flame && state.flame.select) ? 1 : 0,
+                       v => { if(state.flame) state.flame.select = v; }, true));
     fg.append(mkSlider('Iterations', 1, 24, 1, state.iters, v => { state.iters = v; }, 0));
     fg.append(mkSlider('Primitive size', 0.002, 0.6, 0.002, state.primSize,
                        v => { state.primSize = v; }, 3));
@@ -1590,10 +1627,8 @@ relayout();
 // A starting stack that shows what the tool is for: octahedral mirror planes plus a box fold,
 // recursed. Both are exact isometries, so this is a mathematically clean first image.
 if(!loadFromHash()){
-  state.stack = [newSlot(8), newSlot(5)];
-  state.stack[0].p = [0.42];
-  state.stack[1].p = [1.0];
-  renderStack();
+  applyStarter(BOOT_STARTER);
+  const nb = $('presetName'); if(nb) nb.value = '';
 }
 pushHistory();
 requestAnimationFrame(frame);
