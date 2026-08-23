@@ -62,6 +62,8 @@ A top bar and two rails.
 **Top bar:** New, pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide panels (H),
 fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
 
+The right rail opens on **Flame IFS**; the fold stack is the other tab.
+
 Undo history stores captured **presets** — the same pure snapshot the preset system produces —
 so undo can never drift from what a save would record. One entry per gesture rather than per
 frame: sliders push on release, not while dragging.
@@ -216,7 +218,17 @@ appended and existing ones never move.
 `import .flame` reads a JWildfire / Apophysis flame and turns it into geometry — the **linear
 subset only**, which is a hard boundary rather than a limitation of effort.
 
-**Why linear only.** A flame renders by CHAOS GAME: push a point forward through randomly chosen
+**What counts as linear.** The whole affine variation family is accepted — `linear`, `linear3D`,
+`linearT3D` — and a variation's AMOUNT is free rather than having to be 1.0, because the amount
+simply scales the affine result. Amounts within the family add. `post` / `yzPostCoefs` /
+`zxPostCoefs` are composed rather than ignored, since silently dropping a post transform would
+import geometry that is wrong without saying so.
+
+`linear` only carries z when the flame sets `preserve_z`; `linear3D` always does. A 2D-only xform
+would collapse z into a singular, uninvertible map, so z is passed through instead and the import
+warns that the attractor is planar.
+
+**Why affine only.** A flame renders by CHAOS GAME: push a point forward through randomly chosen
 maps and accumulate a histogram. A distance estimator cannot do that at all. What it can do is
 run a contractive affine IFS BACKWARDS — the attractor satisfies A = union of f_i(A), so a point
 near A lies in some f_i(A) and f_i inverse carries it back. That works for affine maps and only
@@ -231,6 +243,10 @@ definitively wrong, and four give exact 0.5-similarities. XY then ZX then YZ is 
 survivors differ only for an xform with non-diagonal blocks in TWO planes at once; for the common
 case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
 import ever comes out visibly wrong.
+
+**Bundled examples.** The Flame tab has a picker for the flames in `examples/`, fetched the same
+way the help panel reads `README.md` — so, like the README, **the `examples/` folder has to be
+deployed** for them to load.
 
 **The transform editor.** Flame IFS has its own tab beside the fold stack, with a card per
 transform: enable, duplicate, delete, and per-transform scale / rotate XYZ / move XYZ. Each card
