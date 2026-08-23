@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.18.0-variations';
+export const BUILD = '0.19.0-xform-variations';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -88,6 +88,8 @@ uniform mat3  uFlameMi[8];
 uniform vec3  uFlameTi[8];
 uniform vec3  uFlameFp[8];
 uniform float uFlameEx[8];
+uniform float uFlameVAmt[8];
+uniform vec2  uFlameVP[8];
 
 // crystal cluster primitive
 uniform float uXShards;
