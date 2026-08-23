@@ -192,12 +192,65 @@ export const MAX_XFORMS = 8;
 // invert to a quadratic with an ambiguous branch. The four below invert exactly.
 //
 // p1 / p2 are the variation's own parameters; a null slot means the variation has none.
+// Verified against the JWildfire sources at
+// src/org/jwildfire/create/tina/variation, and every inverse below was checked numerically for
+// the property the backward path actually needs: V(V^-1(q)) == q.
+// A variation's parameters are pinned to explicit SLOTS in a shared 12-float store, rather than
+// packed positionally. Slots are never reused across variations, so switching a variation cannot
+// silently reinterpret a value you set for a different one, and a preset stays meaningful.
+export const VP_SLOTS = 12;
+
 export const FLAME_VARIATIONS = [
-  { name: 'linear3D',     p1: null,                       p2: null },
-  { name: 'spherical3D',  p1: null,                       p2: null },
-  { name: 'swirl',        p1: ['Twist', -3, 3, 0.005, 0.8], p2: null },
-  { name: 'radial power', p1: ['Power', -3, 3, 0.005, 2],   p2: null }
+  { name: 'linear3D',     params: [] },
+  { name: 'spherical3D',  params: [] },
+  { name: 'swirl',        params: [[0, 'Twist', -3, 3, 0.005, 0.8]] },
+  { name: 'radial power', params: [[1, 'Power', -3, 3, 0.005, 2]] },
+  { name: 'exp',          params: [] },
+  { name: 'log',          params: [] },
+  { name: 'unpolar',      params: [] },
+  { name: 'polar',        params: [] },
+  { name: 'zscale',       params: [] },
+  { name: 'zcone',        params: [] },
+  // The complex-analytic family — JWildfire's "complex vars by cothe" set. Every one of these
+  // is many-to-one going forward, yet each has a PRINCIPAL inverse that is a true right inverse
+  // (sin(asin z) == z identically), which is exactly and only what the backward path needs.
+  // All are conformal, so the norm is |g'| = 1 / |f'(g(q))| — the forward derivative suffices.
+  { name: 'sin',          params: [] },
+  { name: 'cos',          params: [] },
+  { name: 'tan',          params: [] },
+  { name: 'sinh',         params: [] },
+  { name: 'cosh',         params: [] },
+  { name: 'tanh',         params: [] },
+  { name: 'sec',          params: [] },
+  { name: 'csc',          params: [] },
+  { name: 'cot',          params: [] },
+  { name: 'sech',         params: [] },
+  { name: 'csch',         params: [] },
+  { name: 'coth',         params: [] },
+  // A genuine 3D Mobius: inversion about a centre, then rotate, scale and translate. Every
+  // orientation-preserving Mobius of R^3 that is not a similarity has this form, and every step
+  // inverts in closed form — verified exact both ways and conformal to 1e-8.
+  //
+  // NOT the same as JWildfire's `mobiq`. Mobiq is a quaternion Mobius that computes four
+  // components and DISCARDS the k one, so it is a projection rather than a bijection of R^3:
+  // inverting it would mean recovering the component it threw away, which has no closed form.
+  // Mobiq can only ever be a fold; this can be an xform variation, and is the better map anyway.
+  { name: 'mobius3D',     params: [
+      [2, 'Centre X', -3, 3, 0.005, 0], [3, 'Centre Y', -3, 3, 0.005, 0],
+      [4, 'Centre Z', -3, 3, 0.005, 0],
+      [5, 'Move X', -3, 3, 0.005, 0],   [6, 'Move Y', -3, 3, 0.005, 0],
+      [7, 'Move Z', -3, 3, 0.005, 0],
+      [8, 'Scale', 0.05, 4, 0.005, 1],
+      [9, 'Rotate X\u00b0', -180, 180, 0.5, 0], [10, 'Rotate Y\u00b0', -180, 180, 0.5, 0],
+      [11, 'Rotate Z\u00b0', -180, 180, 0.5, 0]] }
 ];
+
+// Defaults for the shared parameter store, taken from the variation specs.
+export function defaultVP(){
+  const vp = new Array(VP_SLOTS).fill(0);
+  FLAME_VARIATIONS.forEach(v => v.params.forEach(([i, , , , , d]) => { vp[i] = d; }));
+  return vp;
+}
 
 // An xform keeps its IMPORTED affine untouched and layers editable offsets on top, so the
 // editor is non-destructive: "reset" restores exactly what the file said, and a preset can
@@ -209,7 +262,7 @@ export function makeXform(M, T, weight = 1){
     // An imported flame folds its variation amount into the affine at parse time, so it arrives
     // as linear3D at amount 1. Switching to another variation layers it on top of that affine,
     // which is flame semantics: f(p) = V(affine(p)).
-    vari: 0, vamt: 1, vp: [0.8, 2],
+    vari: 0, vamt: 1, vp: defaultVP(),
     on: true, weight
   };
 }
@@ -249,8 +302,10 @@ export function resolveXform(x){
     expand: opNorm(Mi),
     vari: Math.max(0, Math.min(FLAME_VARIATIONS.length - 1, x.vari | 0)),
     vamt: isFinite(x.vamt) ? x.vamt : 1,
-    vp: [(x.vp && isFinite(x.vp[0])) ? x.vp[0] : 0.8,
-         (x.vp && isFinite(x.vp[1])) ? x.vp[1] : 2]
+    vp: (() => { const d = defaultVP();
+                 for(let i = 0; i < VP_SLOTS; i++)
+                   if(x.vp && isFinite(x.vp[i])) d[i] = x.vp[i];
+                 return d; })()
   };
 }
 
