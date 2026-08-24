@@ -330,13 +330,59 @@ export function resolveXform(x){
   };
 }
 
+// The attractor's bounding box, found by iterating B -> union of f_i(B) to a fixed point.
+// Cheap, exact for a contractive IFS, and it is what makes the good selection rule possible.
+export function flameHull(maps){
+  let lo = [0, 0, 0], hi = [0, 0, 0];
+  for(let it = 0; it < 300; it++){
+    let nlo = lo.slice(), nhi = hi.slice();
+    maps.forEach(m => {
+      for(let c = 0; c < 8; c++){
+        const v = [(c & 1) ? hi[0] : lo[0], (c & 2) ? hi[1] : lo[1], (c & 4) ? hi[2] : lo[2]];
+        for(let r = 0; r < 3; r++){
+          const w = m.M[r*3]*v[0] + m.M[r*3+1]*v[1] + m.M[r*3+2]*v[2] + m.T[r];
+          if(w < nlo[r]) nlo[r] = w;
+          if(w > nhi[r]) nhi[r] = w;
+        }
+      }
+    });
+    const done = nlo.every((v, i) => Math.abs(v - lo[i]) < 1e-12) &&
+                 nhi.every((v, i) => Math.abs(v - hi[i]) < 1e-12);
+    lo = nlo; hi = nhi;
+    if(done) break;
+  }
+  return { lo, hi };
+}
+
+// Axis-aligned box of f_i(hull) — the region this map is responsible for.
+function imageBox(m, hull){
+  const lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
+  for(let c = 0; c < 8; c++){
+    const v = [(c & 1) ? hull.hi[0] : hull.lo[0],
+               (c & 2) ? hull.hi[1] : hull.lo[1],
+               (c & 4) ? hull.hi[2] : hull.lo[2]];
+    for(let r = 0; r < 3; r++){
+      const w = m.M[r*3]*v[0] + m.M[r*3+1]*v[1] + m.M[r*3+2]*v[2] + m.T[r];
+      if(w < lo[r]) lo[r] = w;
+      if(w > hi[r]) hi[r] = w;
+    }
+  }
+  return { lo, hi };
+}
+
 // All enabled xforms, resolved. This is what the renderer uploads.
 export function resolveFlame(flame){
   if(!flame || !flame.maps) return [];
-  return flame.maps.filter(x => x.on !== false)
-                   .map(resolveXform)
-                   .filter(Boolean)
-                   .slice(0, MAX_XFORMS);
+  const out = flame.maps.filter(x => x.on !== false)
+                        .map(resolveXform)
+                        .filter(Boolean)
+                        .slice(0, MAX_XFORMS);
+  if(out.length){
+    const hull = flameHull(out);
+    out.forEach(m => { const b = imageBox(m, hull); m.blo = b.lo; m.bhi = b.hi; });
+    out.hull = hull;
+  }
+  return out;
 }
 
 // Only the COUNT is baked into the shader; the matrices are uniforms, so editing a transform
@@ -345,7 +391,7 @@ export function resolveFlame(flame){
 // signature; their amounts and parameters are uniforms and do not.
 export function flameKey(flame){
   const r = resolveFlame(flame);
-  const sel = flame && flame.select ? 1 : 0;
+  const sel = Math.max(0, Math.min(2, (flame && flame.select) | 0));
   return r.length + ':' + sel + ':' + r.map(m => m.vari).join('');
 }
 
