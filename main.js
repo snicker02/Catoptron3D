@@ -735,7 +735,8 @@ function renderXforms(){
   fl.maps.forEach((x, i) => {
     const r = resolveXform(x);
     const card = document.createElement('div');
-    card.className = 'xf' + (x.on === false ? ' off' : '');
+    const live = x.on !== false && !(isFinite(x.weight) && x.weight <= 0);
+    card.className = 'xf' + (live ? '' : ' off');
 
     const head = document.createElement('div');
     head.className = 'xfhead';
@@ -745,10 +746,11 @@ function renderXforms(){
     const sc = document.createElement('span');
     sc.className = 'sc';
     // a map at or above 1.0 cannot converge; say so rather than let it render as noise
-    sc.textContent = r ? (r.scale < 0.999 ? '\u00d7' + r.scale.toFixed(3)
+    sc.textContent = !live ? 'inactive'
+                   : r ? (r.scale < 0.999 ? '\u00d7' + r.scale.toFixed(3)
                                           : '\u00d7' + r.scale.toFixed(3) + ' not contractive')
                        : 'singular';
-    if(r && r.scale >= 0.999) sc.style.color = 'var(--warn1)';
+    if(live && r && r.scale >= 0.999) sc.style.color = 'var(--warn1)';
     head.append(nm, sc);
     head.append(
       mkBtn(x.on === false ? '\u25cb' : '\u25c9', () => {
@@ -771,6 +773,18 @@ function renderXforms(){
     // Variation selector — the flame-editor move: swap linear3D for spherical on one xform.
     // Marked baked because the variation TYPE compiles in (each emits different inverse code);
     // its amount and parameter are uniforms and stay live.
+    // Weight: the file's own value. In a chaos game it sets how often this xform is chosen,
+    // which paints DENSITY; a distance-estimated surface has no density to paint, so above zero
+    // it does not change what you see here. ZERO is different — the xform is then never chosen
+    // and drops out of the attractor entirely, which is a real geometric change.
+    card.append(mkSlider('Weight', 0, 5, 0.005,
+                         isFinite(x.weight) ? x.weight : 1,
+                         v => {
+                           const was = (isFinite(x.weight) ? x.weight : 1) > 0;
+                           x.weight = v;
+                           if(was !== (v > 0)){ renderXforms(); renderXaos(); pushHistory(); }
+                           else touchXform();
+                         }, 3));
     card.append(mkSelect('Variation', FLAME_VARIATIONS.map(v => v.name), x.vari,
                          v => { x.vari = v; renderXforms(); pushHistory(); }, true));
     card.append(mkSlider('Var amount', -3, 3, 0.005, x.vamt,
@@ -801,7 +815,11 @@ function touchXform(){
   const fl = state.flame;
   if(!fl) return;
   document.querySelectorAll('#xforms .xf .sc').forEach((el, i) => {
-    const r = resolveXform(fl.maps[i]);
+    const x = fl.maps[i];
+    if(x.on === false || (isFinite(x.weight) && x.weight <= 0)){
+      el.textContent = 'inactive'; el.style.color = ''; return;
+    }
+    const r = resolveXform(x);
     if(!r){ el.textContent = 'singular'; return; }
     el.textContent = '\u00d7' + r.scale.toFixed(3) + (r.scale < 0.999 ? '' : ' not contractive');
     el.style.color = r.scale < 0.999 ? '' : 'var(--warn1)';
