@@ -449,7 +449,23 @@ The variation TYPE is compiled in (each emits different inverse code) so swappin
 while its amount and parameter are uniforms and stay live. **Map selection** moved out of the
 fold slot and into the flame, where it belongs.
 
-**Map selection is a heuristic, and it is exposed.** The exact rule would be "the inverse of the
+**Map selection: the exact rule, and two heuristics.** For an affine IFS the correct backward
+step applies the inverse of the map whose IMAGE contains p. That sounded like it had no closed
+form, and for a long time this tool approximated it — which is why imported flames rendered as
+sparse dust. It does have one: the attractor's bounding hull is found by iterating
+`B -> union of f_i(B)` to a fixed point, and the image of a box under an axis-aligned affine map
+IS a box, so "does p lie in image i" is an exact containment test.
+
+On the Jerusalem cube the 20 image boxes come out **perfectly disjoint**, so the rule is exact
+there, and it **misses zero attractor cells** against a chaos-game ground truth where
+nearest-image missed 1478 of them. `image box` is the default for imported flames; the two older
+heuristics remain for flames whose maps are not axis-aligned.
+
+Pair it with the **Flame hull** primitive — the attractor's own bounding box — and you get the
+classic IFS estimator, distance to the hull over the accumulated expansion. That renders a solid
+attractor rather than the dust a guessed sphere radius gives.
+
+**The older heuristics are still heuristics.** The exact rule would be "the inverse of the
 map whose image contains p", which has no closed form for a general affine IFS. `Select` offers
 *nearest image* (apply every inverse, keep the one landing closest to the origin) and *nearest
 fixed point* (each map contracts toward its own fixed point, so those points partition space).
