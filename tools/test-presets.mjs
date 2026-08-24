@@ -468,6 +468,29 @@ console.log('preset format v' + PRESET_VERSION + '\n');
               return r.flame === null && r.warnings.length > 0; })());
 }
 
+// 11b. SELECTION MODE PLUMBING. `select` is a THREE-way mode and main.js was coercing it with a
+//      ternary, so `image box` (2) silently arrived at the shader as `nearest fixed point` (1).
+//      The render stayed plausible, which is why it survived a whole round of debugging.
+{
+  const src = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const line = (src.match(/flameSelect:.*/) || [''])[0];
+  ok('main.js does not coerce the selection mode to a boolean',
+     !/\?\s*1\s*:\s*0/.test(line), line.trim());
+
+  const { assemble } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+  const fl = parseFlameTop(readFileSync(
+    new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8'));
+  const emitted = [0, 1, 2].map(sel => {
+    fl.select = sel;
+    const g = assemble({ stack: [{ type: 26, p: [1] }], prim: 7, iters: 4, steps: 96,
+                         ao: false, shadow: false, glow: false, bounces: 0, flame: fl });
+    return g.includes('sdBoxLoHi(p, uFlameBLo') ? 'box'
+         : g.includes('uFlameFp[0]') ? 'fixed' : 'image';
+  });
+  ok('each selection mode emits its own rule',
+     emitted.join(',') === 'image,fixed,box', emitted.join(','));
+}
+
 // 12. DOM LINT. getElementById returns the FIRST match, so a duplicated id silently wires every
 //     handler to the wrong element and the visible control does nothing. That is exactly what
 //     happened when the flame panel moved rails and the old copy was left behind: the buttons
