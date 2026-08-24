@@ -187,6 +187,14 @@ button:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
   text-transform:uppercase;color:var(--dim);
 }
 .tab.on{border-color:var(--ice1);color:var(--ice2);background:var(--panel2)}
+table.xaos{border-collapse:collapse;font-family:var(--mono);font-size:9px;margin:2px 0 6px}
+table.xaos th{color:var(--note);font-weight:400;padding:1px 3px;text-align:center}
+table.xaos td{padding:1px}
+button.xa{
+  width:15px;height:15px;padding:0;border-radius:3px;background:var(--sunken);
+  border:1px solid var(--edge2);
+}
+button.xa.on{background:var(--ice1);border-color:var(--ice1)}
 .xf{background:var(--card);border:1px solid var(--edge2);border-radius:7px;padding:9px;margin-bottom:8px}
 .xf.off{opacity:.42}
 .xfhead{display:flex;align-items:center;gap:6px;margin-bottom:7px}
@@ -376,6 +384,10 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
       <input type="file" id="flameFile" accept=".flame,application/xml,text/xml" hidden>
       <div id="flameGlobals"></div>
       <div id="xforms"></div>
+    </div>
+    <div class="group">
+      <h2>Xaos</h2>
+      <div id="xaosGrid"></div>
       <p class="note">JWildfire / Apophysis, <b>linear xforms only</b>. Each transform keeps its
       imported affine; scale, rotate and translate layer on top, so <b>reset edits</b> restores
       the file exactly. Matrices are uniforms — dragging these never recompiles.</p>
