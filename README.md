@@ -367,6 +367,36 @@ One consequence worth knowing: contractivity is a property of the EFFECTIVE map,
 check multiplies the affine's norm by the amount. Testing the bare affine reported every xform of
 a perfectly good 0.5 flame as non-contractive.
 
+**Xaos, and why weight is absent.** These look like a pair and behave nothing alike, so it is
+worth being precise. In a chaos game, **weight** sets how often a map is chosen and **xaos** sets
+which map may follow which. Measured over a five-million-point run on the square-corners flame:
+
+| change | difference in support at 0.2M / 1M / 5M points |
+|---|---|
+| weights 8,1,1,1 | 546 / 155 / **10** |
+| weights 1,1,1,0.05 | 573 / 252 / **126** |
+| xaos: nothing may lead to xform 4 | 1818 / 1818 / **1818** |
+
+Weight differences shrink toward zero as sampling improves — same SET, different DENSITY, and the
+apparent change was under-sampling of rare regions. Xaos differences do not move at all. A
+chaos-game renderer paints density as brightness, so weight matters there; a distance-estimated
+surface has no density to paint, so **weight has no geometric effect and is not exposed**. Xaos
+does, and now has its own section.
+
+Because only the zero pattern reaches the estimator, the Xaos grid stores allowed/forbidden
+rather than magnitudes, and the adjacency is baked into the shader.
+
+With a restricted matrix this becomes a **graph-directed IFS**: the set a point occupies depends
+on which map was applied last, so `A_j = f_j(union of A_i over i that may precede j)` and every
+transform gets its OWN bounding box rather than sharing one. The backward walk carries the last
+map it undid and only considers predecessors xaos permits.
+
+Those per-state hulls are found by iterating DOWNWARD from a box that provably contains the
+attractor (radius `t/(1-c)` for contractions bounded by c with translations bounded by t).
+Iterating upward from a seed point is the obvious approach and is wrong in a way that looks fine:
+the seed never leaves, so every state hull ends up containing the origin and the boxes all
+overlap, which quietly destroys the exact selection rule.
+
 **The transform editor.** Flame IFS has its own tab beside the fold stack, with a card per
 transform: enable, duplicate, delete, and per-transform scale / rotate XYZ / move XYZ. Each card
 shows its resolved contraction and flags any transform that has reached 1.0, because a
