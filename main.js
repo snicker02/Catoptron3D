@@ -589,6 +589,12 @@ const EXAMPLE_FLAMES = [
     camDist: 5.25, camAzim: -1.434, camElev: -0.565, fov: 1.3,
     palette: 0, trapScale: 0.55, trapShift: 0.12, exposure: 1.25, renderScale: 0.7
   }],
+  ['Jerusalem cube (20 xforms)', 'examples/jerusalem-cube.flame', {
+    prim: 1, primStyle: 0, primSize: 0.5, primRound: 0.005, iters: 2, ifsScale: 1.0,
+    ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
+    bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05, ambient: 0.30, spec: 0.6, rim: 0.7,
+    camDist: 2.6, camAzim: 0.9, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
+  }],
   ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
     prim: 2, primSize: 0.07, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
     steps: 384, stepScale: 0.85, eps: 0.0003, camDist: 3.2, camAzim: 0.9, camElev: 0.22
@@ -626,9 +632,12 @@ function refreshFlameLabel(){
   const e = $('flameName');
   if(!e) return;
   const n = resolveFlame(state.flame).length;
+  const w = (state.flame && state.flame.warnings) ? state.flame.warnings.length : 0;
   e.textContent = state.flame
-    ? state.flame.name + ' \u00b7 ' + n + ' active of ' + state.flame.maps.length
+    ? state.flame.name + ' \u00b7 ' + n + ' active of ' + state.flame.maps.length +
+      (w ? '  \u26a0 ' + w + ' warning' + (w > 1 ? 's' : '') + ' (console)' : '')
     : 'no flame \u2014 import one, or add a transform to build by hand';
+  e.style.color = w ? 'var(--warn1)' : '';
 }
 
 /* ── flame transform editor ────────────────────────────────────────────────────────────────
