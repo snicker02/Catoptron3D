@@ -34,7 +34,11 @@ export const PRIMS = [
     frame: 'sdTorusFrame', frameDeps: ['sdTorusFrame'] },
   { name: 'City',      fn: 'sdCity',   deps: ['sdCity'],
     frame: 'sdCityFrame', frameDeps: ['sdCityFrame'] },
-  { name: 'Crystal',   fn: 'sdCrystal', deps: ['sdCrystal'] }
+  { name: 'Crystal',   fn: 'sdCrystal', deps: ['sdCrystal'] },
+  // The imported flame's own bounding box. Paired with Flame IFS this is the classic IFS
+  // estimator — distance to the attractor's hull, divided by the accumulated expansion — and it
+  // renders a solid attractor instead of the dust a guessed sphere radius gives.
+  { name: 'Flame hull', fn: 'sdHull', deps: ['sdHull'] }
 ];
 
 export const PRIM_STYLES = ['solid', 'shell (hollow)', 'frame (edges)'];
@@ -89,9 +93,9 @@ export function normalizeCfg(cfg){
     flameN:   Math.max(0, Math.min(MAX_XFORMS, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
-    flameSelect: cfg.flameSelect !== undefined
-                   ? (cfg.flameSelect ? 1 : 0)
-                   : ((cfg.flame && cfg.flame.select) ? 1 : 0),
+    flameSelect: Math.max(0, Math.min(2, cfg.flameSelect !== undefined
+                   ? cfg.flameSelect | 0
+                   : ((cfg.flame && cfg.flame.select) | 0))),
     disp:     !!cfg.disp,
     feedback: Math.max(0, Math.min(2, cfg.feedback | 0)),
     env:      !!cfg.env,
@@ -283,12 +287,25 @@ export function assemble(cfgIn){
 ${(V_INV[v] || V_INV[0])(k)}
       q = uFlameMi[${k}] * q + uFlameTi[${k}];
       float ex = ve * uFlameEx[${k}];
-      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
-      float d = dot(dv, dv) * bias;
+${cfg.flameSelect === 2 ? `      // IMAGE BOX: for an affine IFS the exact rule is "whose image contains p", and the image
+      // of the attractor's hull under an axis-aligned map IS a box, so the test is exact rather
+      // than a heuristic. On a Jerusalem cube the 20 image boxes are perfectly disjoint and this
+      // misses ZERO attractor cells, where nearest-image missed most of them.
+      float d = sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]) * bias;` :
+`      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
+      float d = dot(dv, dv) * bias;`}
       if(d < best){ best = d; bq = q; bex = ex; }
     }`).join('');
 
   // Complex arithmetic, emitted once and only when a flame is present.
+  const BOXSEL = cfg.flameSelect === 2 ? `
+float sdBoxLoHi(vec3 p, vec3 lo, vec3 hi){
+  vec3 c = (lo + hi) * 0.5, h = (hi - lo) * 0.5;
+  vec3 q = abs(p - c) - h;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+` : '';
+
   const CPLX = `
 vec2 cmul(vec2 a, vec2 b){ return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 vec2 cinv(vec2 a){ float d = max(dot(a, a), 1e-12); return vec2(a.x, -a.y) / d; }
@@ -315,7 +332,7 @@ vec2 cacosh(vec2 z){ return clog(z + csqrtc(csqr(z) - vec2(1.0, 0.0))); }
 vec2 catanh(vec2 z){ return 0.5 * clog(cdiv(vec2(1.0, 0.0) + z, vec2(1.0, 0.0) - z)); }
 `;
 
-  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? CPLX + `
+  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? BOXSEL + CPLX + `
 vec3 flameFold(vec3 p, inout float s, inout vec4 trap, float bias){
   float best = 1e18;
   vec3 bq = p;
