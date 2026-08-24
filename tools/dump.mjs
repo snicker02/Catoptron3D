@@ -115,6 +115,9 @@ const deStacks = [
   { label: 'vortex',         stack: [{ type: 18, p: [0.7, 1] }], iters: 2 },
   { label: 'flame ifs 6',    stack: [{ type: 26, p: [0, 1] }], iters: 6,  prim: 2, flame: FLAME },
   { label: 'flame ifs 12',   stack: [{ type: 26, p: [1, 1] }], iters: 12, prim: 2, flame: FLAME },
+  { label: 'flame xaos',     stack: [{ type: 26, p: [1] }], iters: 6, prim: 7,
+    flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/square-corners-linear3d.flame', import.meta.url),'utf8'));
+                    f.select = 2; f.maps.forEach((x, i) => { x.chaos = [1, 1, 1, 0]; }); return f; })() },
   { label: 'flame boxsel',   stack: [{ type: 26, p: [1] }], iters: 7, prim: 7,
     flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/jerusalem-cube.flame', import.meta.url),'utf8'));
                     f.select = 2; return f; })() },
