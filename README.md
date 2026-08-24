@@ -458,7 +458,13 @@ IS a box, so "does p lie in image i" is an exact containment test.
 
 On the Jerusalem cube the 20 image boxes come out **perfectly disjoint**, so the rule is exact
 there, and it **misses zero attractor cells** against a chaos-game ground truth where
-nearest-image missed 1478 of them. `image box` is the default for imported flames; the two older
+nearest-image missed 1478 of them. Every import now also **reconfigures and reframes**: the Flame hull primitive, a workable
+iteration count and epsilon, and the camera aimed at the attractor's own centre and backed off to
+fit its hull. This used to happen only on the FIRST import — loading a second flame kept the
+previous primitive and iteration count, so the new attractor was rendered through settings meant
+for the old one and looked broken.
+
+`image box` is the default for imported flames; the two older
 heuristics remain for flames whose maps are not axis-aligned.
 
 Pair it with the **Flame hull** primitive — the attractor's own bounding box — and you get the
