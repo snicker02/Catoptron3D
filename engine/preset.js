@@ -38,13 +38,14 @@ export function capture(state, defaults, OPS, name = ''){
     // records what you changed rather than a flattened matrix — and stays re-editable.
     f: state.flame ? {
       name: state.flame.name,
-      select: state.flame.select ? 1 : 0,
+      select: (state.flame.select | 0),
       maps: state.flame.maps.map(x => ({
         M: x.M.map(v => round(v, 9)), T: x.T.map(v => round(v, 9)),
         scale: round(x.scale, 6), rot: x.rot.map(v => round(v, 4)),
         tr: x.tr.map(v => round(v, 6)),
         vari: x.vari | 0, vamt: round(x.vamt, 6),
         vp: (x.vp || []).slice(0, 12).map(v => round(v, 6)),
+        chaos: x.chaos ? x.chaos.map(v => (v ? 1 : 0)) : null,
         on: x.on !== false, weight: round(x.weight || 1, 6)
       }))
     } : null,
@@ -120,7 +121,7 @@ export function apply(preset, defaults, OPS){
     const n3 = (a, d) => [0, 1, 2].map(i => (Array.isArray(a) && isFinite(a[i])) ? a[i] : d);
     flame = {
       name: p.f.name || 'flame',
-      select: p.f.select ? 1 : 0,
+      select: (p.f.select | 0),
       maps: p.f.maps.filter(x => Array.isArray(x.M) && x.M.length === 9).map(x => ({
         M: x.M.slice(), T: n3(x.T, 0),
         scale: isFinite(x.scale) ? x.scale : 1,
@@ -128,6 +129,7 @@ export function apply(preset, defaults, OPS){
         vari: (x.vari | 0) || 0,
         vamt: isFinite(x.vamt) ? x.vamt : 1,
         vp: Array.isArray(x.vp) ? x.vp.slice(0, 12) : [],
+        chaos: Array.isArray(x.chaos) ? x.chaos.map(v => (v ? 1 : 0)) : null,
         on: x.on !== false, weight: isFinite(x.weight) ? x.weight : 1
       }))
     };
