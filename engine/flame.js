@@ -355,14 +355,17 @@ export function resolveXform(x){
 
 // Adjacency from the xaos rows: allow[i][j] is 1 when the chaos game may go from xform i to j.
 // A missing chaos row means that xform imposes no restriction.
+// Adjacency for the SURVIVING xforms. A chaos row is indexed by the xform's position in the
+// FILE, so once any xform is disabled the rows have to be remapped through srcIndex rather than
+// read positionally. Reading them positionally silently pointed each row at the wrong column and
+// left the last transform with no permitted successors at all.
 export function xaosMatrix(maps){
   const n = maps.length;
-  const A = [];
-  for(let i = 0; i < n; i++){
-    const row = maps[i].chaos;
-    A.push(Array.from({ length: n }, (_, j) => (row && row.length > j) ? (row[j] ? 1 : 0) : 1));
-  }
-  return A;
+  return maps.map(a => Array.from({ length: n }, (_, b) => {
+    const row = a.chaos;
+    const col = maps[b].srcIndex;
+    return (row && row.length > col) ? (row[col] ? 1 : 0) : 1;
+  }));
 }
 
 export function xaosIsTrivial(A){
@@ -467,10 +470,19 @@ function imageBox(m, hull){
 // All enabled xforms, resolved. This is what the renderer uploads.
 export function resolveFlame(flame){
   if(!flame || !flame.maps) return [];
-  const out = flame.maps.filter(x => x.on !== false)
-                        .map(resolveXform)
-                        .filter(Boolean)
-                        .slice(0, MAX_XFORMS);
+  const out = [];
+  flame.maps.forEach((x, i) => {
+    if(out.length >= MAX_XFORMS) return;
+    if(x.on === false) return;
+    // A zero-weight xform is never chosen by the chaos game, so it is not part of the attractor
+    // at all. Above zero the weight changes DENSITY rather than shape, which a surface renderer
+    // cannot show — but zero is a genuine geometric switch and has to be honoured.
+    if(isFinite(x.weight) && x.weight <= 0) return;
+    const r = resolveXform(x);
+    if(!r) return;
+    r.srcIndex = i;                                // position in the FILE, for the xaos lookup
+    out.push(r);
+  });
   if(out.length){
     const A = xaosMatrix(out);
     const sh = stateHulls(out, A);
