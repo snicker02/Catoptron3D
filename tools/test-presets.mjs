@@ -464,6 +464,44 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        dead.blo.join(',') + ' .. ' + dead.bhi.join(','));
     ok('xaos joins the shader signature', flameKey(sq2) !== flameKey(jx));
 
+    // XAOS ROWS ARE INDEXED BY POSITION IN THE FILE. Once any xform is disabled, reading them
+    // positionally points each row at the wrong column — disabling T2 turned "each may only
+    // follow itself" into rows 100/001/000, silently killing the last transform.
+    {
+      const sq3 = parseFlameTop(readFileSync(
+        new URL('../examples/square-corners-linear3d.flame', import.meta.url), 'utf8'));
+      sq3.maps.forEach((x, i) => { x.chaos = [0, 0, 0, 0]; x.chaos[i] = 1; });
+      const before = resolveFlame(sq3).xaos.map(r => r.join('')).join(' ');
+      ok('identity xaos reads back as the identity', before === '1000 0100 0010 0001', before);
+      sq3.maps[1].on = false;
+      const after = resolveFlame(sq3).xaos.map(r => r.join('')).join(' ');
+      ok('disabling an xform REMAPS the xaos rows rather than truncating them',
+         after === '100 010 001', after);
+    }
+
+    // WEIGHT. Zero removes an xform from the attractor; above zero it is density, not shape.
+    {
+      const sq4 = parseFlameTop(readFileSync(
+        new URL('../examples/square-corners-linear3d.flame', import.meta.url), 'utf8'));
+      const full = resolveFlame(sq4);
+      ok('the file\u2019s weight survives import',
+         sq4.maps.every(x => Math.abs(x.weight - 0.5) < 1e-9),
+         sq4.maps.map(x => x.weight).join(','));
+      sq4.maps[2].weight = 2.5;
+      const heavier = resolveFlame(sq4);
+      ok('a non-zero weight change leaves the geometry alone',
+         heavier.length === full.length &&
+         heavier.every((m, i) => Math.abs(m.scale - full[i].scale) < 1e-12 &&
+                                 m.T.every((v, a) => Math.abs(v - full[i].T[a]) < 1e-12)));
+      sq4.maps[2].weight = 0;
+      const dropped = resolveFlame(sq4);
+      ok('zero weight removes the xform from the attractor',
+         dropped.length === full.length - 1, dropped.length + ' of ' + full.length);
+      ok('and the surviving xaos stays aligned',
+         dropped.xaos.length === dropped.length &&
+         dropped.xaos.every(r => r.length === dropped.length));
+    }
+
     // and it survives a preset
     const rt2 = apply(capture({ ...defaults, flame: sq2, stack: [] },
                               { ...defaults, flame: null }, OPS, 'x'),
