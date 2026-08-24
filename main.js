@@ -189,7 +189,9 @@ function currentCfg(){
     prim:   state.prim,
     flameN: resolveFlame(state.flame).length,
     flameVars: flameVars(state.flame),
-    flameSelect: (state.flame && state.flame.select) ? 1 : 0,
+    // NOT a ternary: this is a three-way mode, and coercing it to 0/1 silently turned
+    // `image box` into `nearest fixed point`. The exact rule never reached the shader.
+    flameSelect: (state.flame && state.flame.select) | 0,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -596,29 +598,20 @@ function applyStarter(name){
 // import lands on generic defaults and a perfectly good flame can render as a speck.
 const EXAMPLE_FLAMES = [
   ['Flame IFS base', 'examples/flame-ifs-base.flame', {
-    prim: 7, primStyle: 0, primSize: 0.6, iters: 10, ifsScale: 1.0,
-    ifsCx: 0, ifsCy: 0, ifsCz: 0, tgtX: 0, tgtY: 0, tgtZ: -1, steps: 384,
-    stepScale: 0.85, eps: 0.0004,
-    bounces: 0, reflect: 0.55, ao: 1.0, fog: 0.35,
-    camDist: 5.25, camAzim: -1.434, camElev: -0.565, fov: 1.3,
+    iters: 10, bounces: 0, reflect: 0.55, ao: 1.0, fog: 0.35,
+    camAzim: -1.434, camElev: -0.565, fov: 1.3,
     palette: 0, trapScale: 0.55, trapShift: 0.12, exposure: 1.25, renderScale: 0.7
   }],
   ['Jerusalem cube (20 xforms)', 'examples/jerusalem-cube.flame', {
-    prim: 7, primStyle: 0, primSize: 0.5, primRound: 0.005, iters: 7, ifsScale: 1.0,
-    ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
-    bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05, ambient: 0.30, spec: 0.6, rim: 0.7,
-    tgtX: 0.5, tgtY: 0.5, tgtZ: 0.5, eps: 0.0004,
-    camDist: 2.9, camAzim: 0.78, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
+    iters: 7, bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05,
+    ambient: 0.30, spec: 0.6, rim: 0.7,
+    camAzim: 0.78, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
   }],
   ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
-    prim: 7, iters: 9, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
-    tgtX: 0, tgtY: 0, tgtZ: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
-    camDist: 4.6, camAzim: 0.9, camElev: 0.28, bounces: 1, reflect: 0.3, renderScale: 0.65
+    iters: 9, camAzim: 0.9, camElev: 0.28, bounces: 1, reflect: 0.3, renderScale: 0.65
   }],
   ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame', {
-    prim: 7, iters: 9, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
-    tgtX: 0, tgtY: 0, tgtZ: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
-    camDist: 3.6, camAzim: 0.9, camElev: 0.9, bounces: 1, reflect: 0.3, renderScale: 0.65
+    iters: 9, camAzim: 0.9, camElev: 0.9, bounces: 1, reflect: 0.3, renderScale: 0.65
   }]
 ];
 
@@ -766,13 +759,34 @@ function resetXformEdits(){
 }
 
 // A flame with no Flame IFS fold in the stack renders nothing, which reads as a broken import.
+// Every import gets a viewable setup, not just the first. This used to return early once any
+// Flame IFS op existed, so loading a second flame kept the previous primitive, iteration count
+// and epsilon — the new attractor rendered through the old settings and looked broken.
+// Aim the orbit camera at the imported attractor and back off far enough to see all of it.
+// Imported flames are rarely centred on the origin, and without this the object sits off frame.
+function frameFlame(){
+  const fm = resolveFlame(state.flame);
+  if(!fm.length || !fm.hull) return;
+  const { lo, hi } = fm.hull;
+  state.tgtX = (lo[0] + hi[0]) * 0.5;
+  state.tgtY = (lo[1] + hi[1]) * 0.5;
+  state.tgtZ = (lo[2] + hi[2]) * 0.5;
+  const r = 0.5 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  state.camDist = Math.max(1.2, r / Math.max(0.2, Math.tan(state.fov * 0.5)) * 1.15);
+}
+
 function ensureFlameOp(){
-  if(state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')) return;
-  const i = OPS.findIndex(o => o.name === 'Flame IFS');
-  state.stack = [newSlot(i)];
-  state.iters = 8; state.ifsScale = 1.0;
+  if(!state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')){
+    state.stack = [newSlot(OPS.findIndex(o => o.name === 'Flame IFS'))];
+  }
+  state.iters = 8;
+  state.ifsScale = 1.0;
+  state.ifsCx = 0; state.ifsCy = 0; state.ifsCz = 0;
   state.prim = PRIMS.findIndex(p => p.name === 'Flame hull');
-  state.eps = 0.0003; state.steps = 384;
+  state.primStyle = 0;
+  state.eps = 0.0004;
+  state.steps = 384;
+  state.stepScale = 0.85;
   renderStack();
 }
 
@@ -783,6 +797,7 @@ function loadFlameText(text, label, settings){
     state.flame = f;
     if(f.select === undefined) f.select = 2;   // exact selection by default on import
     ensureFlameOp();
+    frameFlame();                              // point the camera at the attractor's own centre
     if(settings) Object.assign(state, settings);
     renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
     if(f.warnings.length){
