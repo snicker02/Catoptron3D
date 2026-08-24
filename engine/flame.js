@@ -8,14 +8,26 @@
 //
 // COORDINATE CONVENTION: JWildfire stores a 3D xform as three 2D affines — coefs (XY),
 // yzCoefs (YZ), zxCoefs (ZX) — and the composition order is not documented in the file.
-// It was determined empirically against a known Sierpinski tetrahedron: of the six possible
-// orders, two produce singular values [1, 0.5, 0.25] and are definitively wrong, and four
-// produce exact 0.5-similarities as a Sierpinski demands. XY -> ZX -> YZ is used.
-// The four survivors differ only for an xform with non-diagonal blocks in TWO planes at once;
-// for the common case (rotation in one plane) they agree exactly. If an import ever comes out
-// visibly wrong, PLANE_ORDER below is the single thing to change.
-
-const PLANE_ORDER = ['xy', 'zx', 'yz'];
+//
+// It has to be inferred, and ONE reference object is not enough to pin it down. A Sierpinski
+// tetrahedron only requires every map to be a 0.5-similarity, and FOUR of the six orders satisfy
+// that; the first version of this parser picked XY -> ZX -> YZ from among them and was wrong.
+//
+// A Jerusalem cube is the discriminating case, because it must be ISOTROPIC — it spans [0,1] on
+// every axis. Under the old order it came out 0.41 x 1.0 x 1.0, squashed in x, because the XY
+// block's translation was being scaled by a later block. Requiring BOTH properties leaves
+// exactly one order:
+//
+//   order        Sierpinski 0.5-similarities   Jerusalem isotropic
+//   xy->zx->yz              yes                       NO
+//   yz->xy->zx              yes                       NO
+//   yz->zx->xy              yes                       NO
+//   zx->yz->xy              NO                        yes
+//   zx->xy->yz              yes                       yes   <-- unique
+//
+// Both example flames are checked against these properties in tools/test-presets.mjs, so the
+// order cannot drift back.
+const PLANE_ORDER = ['zx', 'xy', 'yz'];
 
 const PLANES = { xy: [0, 1], yz: [1, 2], zx: [2, 0] };
 
