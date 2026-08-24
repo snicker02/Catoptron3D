@@ -337,6 +337,11 @@ function renderScene(w, h){
     put('uFlameVP', 4, m => m.vp.slice(0, 4),  (loc, b) => gl.uniform4fv(loc, b));
     put('uFlameVQ', 4, m => m.vp.slice(4, 8),  (loc, b) => gl.uniform4fv(loc, b));
     put('uFlameVR', 4, m => m.vp.slice(8, 12), (loc, b) => gl.uniform4fv(loc, b));
+    put('uFlameBLo', 3, m => m.blo || [0, 0, 0], (loc, b) => gl.uniform3fv(loc, b));
+    put('uFlameBHi', 3, m => m.bhi || [0, 0, 0], (loc, b) => gl.uniform3fv(loc, b));
+    const hull = fm.hull || { lo: [-1, -1, -1], hi: [1, 1, 1] };
+    u3(L, 'uHullLo', hull.lo[0], hull.lo[1], hull.lo[2]);
+    u3(L, 'uHullHi', hull.hi[0], hull.hi[1], hull.hi[2]);
   }
   u1(L, 'uSeed', state.seed);
   u1(L, 'uXShards', state.xShards);
@@ -591,26 +596,29 @@ function applyStarter(name){
 // import lands on generic defaults and a perfectly good flame can render as a speck.
 const EXAMPLE_FLAMES = [
   ['Flame IFS base', 'examples/flame-ifs-base.flame', {
-    prim: 2, primStyle: 0, primSize: 0.6, iters: 12, ifsScale: 1.0,
-    ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.15, eps: 0.0003,
+    prim: 7, primStyle: 0, primSize: 0.6, iters: 10, ifsScale: 1.0,
+    ifsCx: 0, ifsCy: 0, ifsCz: 0, tgtX: 0, tgtY: 0, tgtZ: -1, steps: 384,
+    stepScale: 0.85, eps: 0.0004,
     bounces: 0, reflect: 0.55, ao: 1.0, fog: 0.35,
     camDist: 5.25, camAzim: -1.434, camElev: -0.565, fov: 1.3,
     palette: 0, trapScale: 0.55, trapShift: 0.12, exposure: 1.25, renderScale: 0.7
   }],
   ['Jerusalem cube (20 xforms)', 'examples/jerusalem-cube.flame', {
-    prim: 1, primStyle: 0, primSize: 0.5, primRound: 0.005, iters: 2, ifsScale: 1.0,
+    prim: 7, primStyle: 0, primSize: 0.5, primRound: 0.005, iters: 7, ifsScale: 1.0,
     ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
     bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05, ambient: 0.30, spec: 0.6, rim: 0.7,
-    tgtX: 0.5, tgtY: 0.5, tgtZ: 0.5,
+    tgtX: 0.5, tgtY: 0.5, tgtZ: 0.5, eps: 0.0004,
     camDist: 2.9, camAzim: 0.78, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
   }],
   ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
-    prim: 2, primSize: 0.07, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
-    steps: 384, stepScale: 0.85, eps: 0.0003, camDist: 3.2, camAzim: 0.9, camElev: 0.22
+    prim: 7, iters: 9, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
+    tgtX: 0, tgtY: 0, tgtZ: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
+    camDist: 4.6, camAzim: 0.9, camElev: 0.28, bounces: 1, reflect: 0.3, renderScale: 0.65
   }],
   ['Square corners (linear3D)', 'examples/square-corners-linear3d.flame', {
-    prim: 2, primSize: 0.05, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
-    steps: 384, stepScale: 0.85, eps: 0.0004, camDist: 3.4, camAzim: 0.9, camElev: 0.9
+    prim: 7, iters: 9, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
+    tgtX: 0, tgtY: 0, tgtZ: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
+    camDist: 3.6, camAzim: 0.9, camElev: 0.9, bounces: 1, reflect: 0.3, renderScale: 0.65
   }]
 ];
 
@@ -636,6 +644,10 @@ async function loadExampleFlame(path, label, settings){
     setStat('could not load example (' + e.message + ') \u2014 serve the folder over http');
   }
 }
+
+// The picker lists the exact rule first because it is the right default; the stored ids keep
+// their original meaning so old presets still mean what they meant.
+const SEL_UI = [2, 0, 1];
 
 function refreshFlameLabel(){
   const e = $('flameName');
@@ -758,8 +770,9 @@ function ensureFlameOp(){
   if(state.stack.some(sl => OPS[sl.type].name === 'Flame IFS')) return;
   const i = OPS.findIndex(o => o.name === 'Flame IFS');
   state.stack = [newSlot(i)];
-  state.iters = 8; state.ifsScale = 1.0; state.prim = 2;
-  state.primSize = 0.07; state.eps = 0.0003; state.steps = 384;
+  state.iters = 8; state.ifsScale = 1.0;
+  state.prim = PRIMS.findIndex(p => p.name === 'Flame hull');
+  state.eps = 0.0003; state.steps = 384;
   renderStack();
 }
 
@@ -768,6 +781,7 @@ function loadFlameText(text, label, settings){
     const f = parseFlame(text);
     flameAutoTried = true;
     state.flame = f;
+    if(f.select === undefined) f.select = 2;   // exact selection by default on import
     ensureFlameOp();
     if(settings) Object.assign(state, settings);
     renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
@@ -1258,9 +1272,10 @@ function buildGlobals(){
   const fg = $('flameGlobals');
   if(fg){
     fg.innerHTML = '';
-    fg.append(mkSelect('Map selection', ['nearest image', 'nearest fixed point'],
-                       (state.flame && state.flame.select) ? 1 : 0,
-                       v => { if(state.flame) state.flame.select = v; }, true));
+    fg.append(mkSelect('Map selection',
+                       ['image box (exact for affine)', 'nearest image', 'nearest fixed point'],
+                       SEL_UI.indexOf((state.flame && state.flame.select) | 0),
+                       v => { if(state.flame) state.flame.select = SEL_UI[v]; }, true));
     const sn = document.createElement('p');
     sn.className = 'note';
     sn.textContent = 'Inversive variations (spherical3D, mobius3D) want NEAREST FIXED POINT. '
