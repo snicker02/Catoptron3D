@@ -378,10 +378,20 @@ which map may follow which. Measured over a five-million-point run on the square
 | xaos: nothing may lead to xform 4 | 1818 / 1818 / **1818** |
 
 Weight differences shrink toward zero as sampling improves — same SET, different DENSITY, and the
-apparent change was under-sampling of rare regions. Xaos differences do not move at all. A
-chaos-game renderer paints density as brightness, so weight matters there; a distance-estimated
-surface has no density to paint, so **weight has no geometric effect and is not exposed**. Xaos
-does, and now has its own section.
+apparent change was under-sampling of rare regions. Xaos differences do not move at all.
+
+**Weight is still shown, per xform, with the file's value.** It was briefly left out on the
+grounds that it changes nothing here, which was the wrong call twice over: it hides what the file
+actually says, and **zero is a genuine geometric switch** — a zero-weight xform is never chosen
+by the chaos game and drops out of the attractor entirely. Above zero it is honestly inert in
+this renderer, and the panel says so rather than implying otherwise. A zero-weight or disabled
+xform is greyed and reads `inactive`.
+
+**Xaos rows are indexed by position in the FILE**, so once any xform is disabled or zero-weighted
+the rows must be remapped through the survivor's original index rather than read positionally.
+Reading them positionally pointed each row at the wrong column: with "each xform may only follow
+itself", disabling the second turned `1000 0100 0010 0001` into `100 001 000` — every row aimed
+at the wrong successor and the last transform left with none at all.
 
 Because only the zero pattern reaches the estimator, the Xaos grid stores allowed/forbidden
 rather than magnitudes, and the adjacency is baked into the shader.
