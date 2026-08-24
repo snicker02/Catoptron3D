@@ -406,6 +406,26 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     // the Sierpinski constraint must still hold with the same order
     ok('the Sierpinski is still all 0.5-similarities',
        resolveFlame(f).every(m => Math.abs(m.scale - 0.5) < 1e-9));
+
+    // IMAGE BOXES. For an affine IFS the exact selection rule is "whose image contains p", and
+    // that is only meaningful if the boxes are computed and genuinely partition the hull.
+    ok('the hull is the unit cube', maps.hull &&
+       maps.hull.lo.every(v => Math.abs(v) < 1e-9) &&
+       maps.hull.hi.every(v => Math.abs(v - 1) < 1e-9),
+       maps.hull ? maps.hull.lo + ' .. ' + maps.hull.hi : 'no hull');
+    ok('every map carries an image box', maps.every(m => m.blo && m.bhi));
+    let overlaps = 0;
+    for(let i = 0; i < maps.length; i++)
+      for(let j = i + 1; j < maps.length; j++){
+        const s3 = [0, 1, 2].every(a =>
+          Math.min(maps[i].bhi[a], maps[j].bhi[a]) - Math.max(maps[i].blo[a], maps[j].blo[a]) > 1e-6);
+        if(s3) overlaps++;
+      }
+    ok('the 20 image boxes are disjoint (so the rule is exact here)', overlaps === 0,
+       overlaps + ' overlapping pairs');
+    ok('every image box sits inside the hull', maps.every(m =>
+       [0, 1, 2].every(a => m.blo[a] >= maps.hull.lo[a] - 1e-9 &&
+                            m.bhi[a] <= maps.hull.hi[a] + 1e-9)));
   }
 
   // rejection paths
