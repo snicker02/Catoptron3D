@@ -181,6 +181,12 @@ export function parseFlame(text){
     }
     const xf = makeXform(M, T, at.weight === undefined ? 1 : Number(at.weight));
     xf.vamt = k;                                   // the file's variation amount, shown as-is
+    // XAOS: this xform's transition weights to every other. Only the ZERO PATTERN matters here.
+    // A chaos-game renderer uses the magnitudes to shape DENSITY, but density is not geometry —
+    // measured over a run of five million points, changing weights leaves the attractor's
+    // support identical while a single xaos zero changes it permanently. So a transition is
+    // either allowed or forbidden, and nothing in between reaches the estimator.
+    xf.chaos = at.chaos ? nums(at.chaos).map(v => (v > 0 ? 1 : 0)) : null;
     maps.push(xf);
   });
 
@@ -290,6 +296,8 @@ export function makeXform(M, T, weight = 1){
     // as linear3D at amount 1. Switching to another variation layers it on top of that affine,
     // which is flame semantics: f(p) = V(affine(p)).
     vari: 0, vamt: 1, vp: defaultVP(),
+    chaos: null,                                   // null means "may follow anything"
+
     on: true, weight
   };
 }
@@ -335,6 +343,7 @@ export function resolveXform(x){
     scale: opNorm(M),
     expand: opNorm(Mi),
     base: x.T,                                     // the file's own translation, for the panel
+    chaos: x.chaos ? x.chaos.slice() : null,       // xaos row, needed to build the adjacency
     vari: Math.max(0, Math.min(FLAME_VARIATIONS.length - 1, x.vari | 0)),
     vamt: isFinite(x.vamt) ? x.vamt : 1,
     vp: (() => { const d = defaultVP();
@@ -342,6 +351,77 @@ export function resolveXform(x){
                    if(x.vp && isFinite(x.vp[i])) d[i] = x.vp[i];
                  return d; })()
   };
+}
+
+// Adjacency from the xaos rows: allow[i][j] is 1 when the chaos game may go from xform i to j.
+// A missing chaos row means that xform imposes no restriction.
+export function xaosMatrix(maps){
+  const n = maps.length;
+  const A = [];
+  for(let i = 0; i < n; i++){
+    const row = maps[i].chaos;
+    A.push(Array.from({ length: n }, (_, j) => (row && row.length > j) ? (row[j] ? 1 : 0) : 1));
+  }
+  return A;
+}
+
+export function xaosIsTrivial(A){
+  return A.every(r => r.every(v => v === 1));
+}
+
+// PER-STATE hulls. With xaos this is a graph-directed IFS: the set a point occupies depends on
+// which map was applied last. A_j = f_j( union of A_i over i that may precede j ), so each xform
+// gets its own bounding box and they are NOT simply f_j(global hull).
+export function stateHulls(maps, A){
+  const n = maps.length;
+
+  // Iterate DOWNWARD from a box that provably contains the attractor, not upward from a seed
+  // point. Seeding from the origin was wrong in a way that looked plausible: the seed never
+  // leaves, so every state hull ends up containing (0,0,0) whether or not that point is in it,
+  // and the boxes all overlap. Downward from a superset is monotone and lands on the truth.
+  //
+  // For contractions with |f| <= c and |T| <= t the attractor lies inside radius t/(1-c).
+  let c = 0, t = 0;
+  maps.forEach(m => {
+    c = Math.max(c, opNorm(m.M));
+    t = Math.max(t, Math.hypot(m.T[0], m.T[1], m.T[2]));
+  });
+  const R = (c < 0.999) ? (t / (1 - c)) * 1.0001 + 1e-6 : 1e6;
+
+  let lo = maps.map(() => [-R, -R, -R]), hi = maps.map(() => [R, R, R]);
+  for(let it = 0; it < 400; it++){
+    const nlo = maps.map(() => [1e30, 1e30, 1e30]);
+    const nhi = maps.map(() => [-1e30, -1e30, -1e30]);
+    let any = false;
+    for(let j = 0; j < n; j++){
+      const m = maps[j];
+      for(let i = 0; i < n; i++){
+        if(!A[i][j]) continue;                     // i cannot precede j
+        any = true;
+        for(let cc = 0; cc < 8; cc++){
+          const v = [(cc & 1) ? hi[i][0] : lo[i][0],
+                     (cc & 2) ? hi[i][1] : lo[i][1],
+                     (cc & 4) ? hi[i][2] : lo[i][2]];
+          for(let r = 0; r < 3; r++){
+            const w = m.M[r*3]*v[0] + m.M[r*3+1]*v[1] + m.M[r*3+2]*v[2] + m.T[r];
+            if(w < nlo[j][r]) nlo[j][r] = w;
+            if(w > nhi[j][r]) nhi[j][r] = w;
+          }
+        }
+      }
+      if(nlo[j][0] > nhi[j][0]){                   // unreachable state: no predecessor at all
+        nlo[j] = [0, 0, 0]; nhi[j] = [0, 0, 0];
+      }
+    }
+    let done = true;
+    for(let j = 0; j < n && done; j++)
+      for(let r = 0; r < 3; r++)
+        if(Math.abs(nlo[j][r] - lo[j][r]) > 1e-12 ||
+           Math.abs(nhi[j][r] - hi[j][r]) > 1e-12) done = false;
+    lo = nlo; hi = nhi;
+    if(done || !any) break;
+  }
+  return { lo, hi };
 }
 
 // The attractor's bounding box, found by iterating B -> union of f_i(B) to a fixed point.
@@ -392,9 +472,14 @@ export function resolveFlame(flame){
                         .filter(Boolean)
                         .slice(0, MAX_XFORMS);
   if(out.length){
-    const hull = flameHull(out);
-    out.forEach(m => { const b = imageBox(m, hull); m.blo = b.lo; m.bhi = b.hi; });
-    out.hull = hull;
+    const A = xaosMatrix(out);
+    const sh = stateHulls(out, A);
+    out.forEach((m, j) => { m.blo = sh.lo[j]; m.bhi = sh.hi[j]; });
+    // the attractor is the union of the per-state hulls
+    const lo = [0, 1, 2].map(r => Math.min(...sh.lo.map(v => v[r])));
+    const hi = [0, 1, 2].map(r => Math.max(...sh.hi.map(v => v[r])));
+    out.hull = { lo, hi };
+    out.xaos = A;
   }
   return out;
 }
@@ -406,7 +491,8 @@ export function resolveFlame(flame){
 export function flameKey(flame){
   const r = resolveFlame(flame);
   const sel = Math.max(0, Math.min(2, (flame && flame.select) | 0));
-  return r.length + ':' + sel + ':' + r.map(m => m.vari).join('');
+  const ax = (r.xaos || []).map(row => row.join('')).join('');
+  return r.length + ':' + sel + ':' + r.map(m => m.vari).join('') + ':' + ax;
 }
 
 export function flameVars(flame){ return resolveFlame(flame).map(m => m.vari); }
