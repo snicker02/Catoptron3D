@@ -12,7 +12,8 @@
 import { PRELUDE, VS } from './prelude.js';
 import { HELPERS } from './helpers.js';
 import { OPS, discIdx, fnName, bankCount } from './ops.js';
-import { flameKey, resolveFlame, flameVars, FLAME_VARIATIONS, MAX_XFORMS } from './flame.js';
+import { flameKey, resolveFlame, flameVars, FLAME_VARIATIONS, MAX_XFORMS,
+         xaosIsTrivial } from './flame.js';
 const FLAME_VARIATION_COUNT = FLAME_VARIATIONS.length;
 
 export { VS };
@@ -93,6 +94,7 @@ export function normalizeCfg(cfg){
     flameN:   Math.max(0, Math.min(MAX_XFORMS, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
+    flameXaos: cfg.flameXaos || (resolveFlame(cfg.flame).xaos || null),
     flameSelect: Math.max(0, Math.min(2, cfg.flameSelect !== undefined
                    ? cfg.flameSelect | 0
                    : ((cfg.flame && cfg.flame.select) | 0))),
@@ -115,7 +117,8 @@ export function signature(cfg){
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
           c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces,
-          c.flameN, c.flameSelect, (c.flameVars || []).join(''), ops].join('|');
+          c.flameN, c.flameSelect, (c.flameVars || []).join(''),
+          (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
 
 export function assemble(cfgIn){
@@ -280,6 +283,22 @@ export function assemble(cfgIn){
                     FLAME_VARIATION_COUNT + ' variations');
   }
 
+  // XAOS. With a non-trivial transition matrix this is a GRAPH-DIRECTED IFS: which maps may
+  // follow which depends on the one just used, so the backward walk has to remember it. The
+  // adjacency is baked (only its zero pattern matters — magnitudes shape density, and density
+  // is not geometry), and gFlamePrev carries the last map undone across iterations.
+  const XA = cfg.flameXaos;
+  const useXaos = !!XA && XA.length >= cfg.flameN && !xaosIsTrivial(XA.slice(0, cfg.flameN)
+                    .map(r => r.slice(0, cfg.flameN)));
+  const allowSrc = useXaos ? `
+const int FLAME_ALLOW[FLAME_N * FLAME_N] = int[FLAME_N * FLAME_N](
+${(() => { const rows = [];
+  for(let i = 0; i < cfg.flameN; i++)
+    for(let j = 0; j < cfg.flameN; j++) rows.push(XA[i][j] ? 1 : 0);
+  return '  ' + rows.join(', '); })()}
+);
+` : '';
+
   const flameBlocks = (cfg.flameVars || []).slice(0, cfg.flameN).map((v, k) => `
     {
       vec3 q = p;
@@ -294,7 +313,10 @@ ${cfg.flameSelect === 2 ? `      // IMAGE BOX: for an affine IFS the exact rule 
       float d = sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]) * bias;` :
 `      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
       float d = dot(dv, dv) * bias;`}
-      if(d < best){ best = d; bq = q; bex = ex; }
+${useXaos ? `      // this map may only be the predecessor if xaos allows it to lead to the last one
+      if(gFlamePrev < 0 || FLAME_ALLOW[${k} * FLAME_N + gFlamePrev] == 1){
+        if(d < best){ best = d; bq = q; bex = ex; bsel = ${k}; }
+      }` : `      if(d < best){ best = d; bq = q; bex = ex; bsel = ${k}; }`}
     }`).join('');
 
   // Complex arithmetic, emitted once and only when a flame is present.
@@ -332,12 +354,14 @@ vec2 cacosh(vec2 z){ return clog(z + csqrtc(csqr(z) - vec2(1.0, 0.0))); }
 vec2 catanh(vec2 z){ return 0.5 * clog(cdiv(vec2(1.0, 0.0) + z, vec2(1.0, 0.0) - z)); }
 `;
 
-  const flameSrc = `\n#define FLAME_N ${cfg.flameN}` + (cfg.flameN ? BOXSEL + CPLX + `
+  const flameSrc = `\n#define FLAME_N ${cfg.flameN}\nint gFlamePrev;` + (cfg.flameN ? allowSrc + BOXSEL + CPLX + `
 vec3 flameFold(vec3 p, inout float s, inout vec4 trap, float bias){
   float best = 1e18;
   vec3 bq = p;
   float bex = 1.0;
+  int bsel = -1;
 ${flameBlocks}
+  gFlamePrev = bsel;
   s *= bex;
   trap = min(trap, vec4(abs(bq), dot(bq, bq)));
   return bq;
@@ -384,6 +408,7 @@ ${useShell ? `  // Shell: the signed distance to the SURFACE of a solid rather t
 // primitive's distance in folded space divided back out by it.
 float mapT(vec3 p, out vec4 trap, out float safe){
   vec3 p0 = p;                        // the original sample point, for escape-time feedback
+  gFlamePrev = -1;                    // no map has been undone yet, so nothing is forbidden
   float s = 1.0;
   float seam = 1e9;
   trap = vec4(1e9);
