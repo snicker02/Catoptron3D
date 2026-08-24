@@ -174,14 +174,23 @@ export function parseFlame(text){
     warnings.push('this is a 2D flame (linear without preserve_z) — z is passed through so the ' +
                   'attractor is planar rather than a collapsed, uninvertible map');
   }
-  if(maps.length > 8){
-    warnings.push(`${maps.length} maps found; only the first 8 are used`);
-    maps.length = 8;
+  if(maps.length > MAX_XFORMS){
+    warnings.push(`${maps.length} xforms found; only the first ${MAX_XFORMS} are used — ` +
+                  'the rest are discarded and the attractor will not match the original');
+    maps.length = MAX_XFORMS;
   }
   return { name, maps, warnings };
 }
 
-export const MAX_XFORMS = 8;
+// Real flames routinely exceed a handful of xforms — a Jerusalem cube needs 20. The cap was 8,
+// which silently discarded the rest and rendered a completely different attractor.
+//
+// The ceiling is the fragment uniform budget, not taste. Per xform the shader can reference
+// 3 vec4 slots for the inverse matrix plus one each for the inverse translation, the expansion,
+// the variation amount, the fixed point and three parameter vec4s. GLSL drops uniforms it never
+// references, so a flame of plain linear3D xforms (no parameters, nearest-image selection) costs
+// about 6 slots each and 24 fits comfortably inside the 224 that WebGL2 guarantees.
+export const MAX_XFORMS = 24;
 
 // Variations available INSIDE an xform.
 //
