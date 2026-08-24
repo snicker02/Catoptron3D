@@ -12,7 +12,7 @@
 import { PRELUDE, VS } from './prelude.js';
 import { HELPERS } from './helpers.js';
 import { OPS, discIdx, fnName, bankCount } from './ops.js';
-import { flameKey, resolveFlame, flameVars, FLAME_VARIATIONS } from './flame.js';
+import { flameKey, resolveFlame, flameVars, FLAME_VARIATIONS, MAX_XFORMS } from './flame.js';
 const FLAME_VARIATION_COUNT = FLAME_VARIATIONS.length;
 
 export { VS };
@@ -86,7 +86,7 @@ export function normalizeCfg(cfg){
     seamSurf: !!cfg.seamSurf,
     primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
     transp:   !!cfg.transp,
-    flameN:   Math.max(0, Math.min(8, cfg.flameN !== undefined
+    flameN:   Math.max(0, Math.min(MAX_XFORMS, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
     flameSelect: cfg.flameSelect !== undefined
