@@ -782,6 +782,46 @@ function showTab(which){
   $('tabFlame').classList.toggle('on', !fold);
 }
 
+
+/* ── quick render ──────────────────────────────────────────────────────────────────────────
+   The viewport is deliberately undersampled — Resolution defaults below 1, and it drops further
+   while you are dragging — so the live image is softer and noisier than a save will be. This
+   renders ONE frame at the exact dimensions the exporter would use and holds it on screen, so
+   what you are looking at is the saved image, just scaled to fit.
+
+   It is the export path minus the encode, which is the point: if the preview looks right the
+   file will too, because the same call produced both. */
+let previewHold = false;
+
+function quickRender(){
+  if(!cur){ setStat('shader still building\u2026'); return; }
+  const [sw, sh] = exportDims();
+  const pw = cv.width, ph = cv.height;
+
+  cv.width = sw; cv.height = sh;
+  if(cv.width !== sw || cv.height !== sh){
+    cv.width = pw; cv.height = ph; W = 0; H = 0;
+    setStat('that size was refused by the browser');
+    return;
+  }
+  renderScene(cv.width, cv.height);
+  if(gl.isContextLost()){
+    setStat('context lost \u2014 reload and try a smaller window');
+    return;
+  }
+  previewHold = true;
+  $('quickBtn').classList.add('on');
+  setStat('preview ' + sw + '\u00d7' + sh + ' \u2014 this is the save. Any change resumes live.');
+}
+
+// Anything that changes the image drops the hold, so the preview can never go quietly stale.
+function releasePreview(){
+  if(!previewHold) return;
+  previewHold = false;
+  W = 0; H = 0;                       // force the loop to resize and redraw
+  $('quickBtn').classList.remove('on');
+}
+
 /* ── top bar ───────────────────────────────────────────────────────────────────────────────
    New / pause / undo / redo / panels / fullscreen / help / theme, mirroring the 2D tool.      */
 
@@ -881,6 +921,7 @@ async function toggleHelp(force){
 }
 
 function wireTopBar(){
+  $('quickBtn').onclick  = () => (previewHold ? releasePreview() : quickRender());
   $('newBtn').onclick    = newProject;
   $('pauseBtn').onclick  = () => setPaused(!paused);
   $('undoBtn').onclick   = () => stepHistory(-1);
@@ -900,6 +941,8 @@ function wireTopBar(){
 
   // one history entry per gesture: `change` fires when a slider is released
   ['panel', 'panelR'].forEach(id => {
+    $(id).addEventListener('input', releasePreview);
+    $(id).addEventListener('change', releasePreview);
     $(id).addEventListener('change', pushHistory);
     $(id).addEventListener('pointerup', () => setTimeout(pushHistory, 0));
   });
@@ -907,6 +950,11 @@ function wireTopBar(){
   addEventListener('keydown', e => {
     if(/input|select|textarea/i.test(e.target.tagName)) return;
     const k = e.key.toLowerCase();
+    if(k === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey){
+      e.preventDefault();
+      return previewHold ? releasePreview() : quickRender();
+    }
+    releasePreview();
     if((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); stepHistory(e.shiftKey ? 1 : -1); return; }
     if(e.ctrlKey || e.metaKey || e.altKey) return;
     if(k === ' '){ e.preventDefault(); setPaused(!paused); }
@@ -1380,7 +1428,10 @@ function navStep(dt){
 
 /* ── resolution ladder: drop while the user is moving, restore when idle ───────────────── */
 let lastInteract = -1e9;
-function bumpInteract(){ lastInteract = performance.now(); }
+function bumpInteract(){
+  lastInteract = performance.now();
+  if(previewHold) releasePreview();   // orbiting, dollying or navigating drops a held preview
+}
 
 function syncSliderDisplay(){ /* sliders are one-way; camera keys/wheel don't write back */ }
 
@@ -1399,6 +1450,10 @@ function frame(now){
 
   syncProgram(now);
 
+  if(previewHold){                    // a held preview is a still; do not redraw over it
+    requestAnimationFrame(frame);
+    return;
+  }
   const busy = (now - lastInteract) < 220;
   const q = state.renderScale * (busy ? 0.55 : 1.0);
   const [dw, dh] = displaySize();
