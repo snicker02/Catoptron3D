@@ -38,6 +38,7 @@ const PALETTES = [
 /* ── state — flat and serialisable ─────────────────────────────────────────────────────── */
 const state = {
   // camera
+  tgtX: 0, tgtY: 0, tgtZ: 0,
   camDist: 5.2, camAzim: 0.9, camElev: 0.35, fov: 1.3, autoSpin: 0.0,
   // structure
   prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35, primThick: 0.03,
@@ -76,7 +77,10 @@ const GROUPS = [
   ['Camera', [
     ['camDist',  'Distance',    1.2, 40,  0.05, 2],
     ['fov',      'FOV',         0.5, 3.0, 0.01, 2],
-    ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2]
+    ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2],
+    ['tgtX',     'Target X',   -8, 8, 0.005, 3],
+    ['tgtY',     'Target Y',   -8, 8, 0.005, 3],
+    ['tgtZ',     'Target Z',   -8, 8, 0.005, 3]
   ]],
   ['IFS recursion', [
     ['iters',    'Iterations',  1, 24,   1,     0],
@@ -234,10 +238,13 @@ const u3 = (L, n, a, b, c) => { if(L[n]) gl.uniform3f(L[n], a, b, c); };
 const u4 = (L, n, a, b, c, d) => { if(L[n]) gl.uniform4f(L[n], a, b, c, d); };
 
 function camPos(){
+  // Orbit AROUND the target, not around the origin. Imported flames are rarely centred on the
+  // origin — a Jerusalem cube occupies [0,1]^3 — so without this they sit off to one side and
+  // orbiting swings them out of frame.
   const ce = Math.cos(state.camElev), se = Math.sin(state.camElev);
-  return [Math.cos(state.camAzim) * ce * state.camDist,
-          se * state.camDist,
-          Math.sin(state.camAzim) * ce * state.camDist];
+  return [state.tgtX + Math.cos(state.camAzim) * ce * state.camDist,
+          state.tgtY + se * state.camDist,
+          state.tgtZ + Math.sin(state.camAzim) * ce * state.camDist];
 }
 
 function renderScene(w, h){
@@ -252,7 +259,7 @@ function renderScene(w, h){
 
   const cp = camPos();
   u3(L, 'uCamPos', cp[0], cp[1], cp[2]);
-  u3(L, 'uCamTgt', 0, 0, 0);
+  u3(L, 'uCamTgt', state.tgtX, state.tgtY, state.tgtZ);
   u1(L, 'uFov', state.fov);
 
   u1(L, 'uMinDist', 0.001);
@@ -392,7 +399,8 @@ const STARTERS = {
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
            ambient: 0.30, spec: 0.55, rim: 0.9,
-           camDist: 5.2, fov: 1.3, camAzim: 0.9, camElev: 0.35,
+           tgtX: 0, tgtY: 0, tgtZ: 0,
+  camDist: 5.2, fov: 1.3, camAzim: 0.9, camElev: 0.35,
            palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0,
            sat: 1.0, exposure: 1.25, renderScale: 0.75 }
   },
@@ -544,7 +552,7 @@ const STARTERS = {
   }
 };
 
-const STARTER_RESET = { primStyle: 0, primThick: 0.03, seed: 1337,
+const STARTER_RESET = { tgtX: 0, tgtY: 0, tgtZ: 0, primStyle: 0, primThick: 0.03, seed: 1337,
                         transp: 0, ior: 1.48, absorb: 0.6, disp: 0,
                         xShards: 9, xFacets: 6, xLen: 1.3, xRad: 0.045, xTip: 1.15,
                         xSpread: 1.0, xVary: 0.85, feedback: 0, bailout: 6.0, stepScale: 0.85, eps: 0.0009, maxDist: 40,
@@ -593,7 +601,8 @@ const EXAMPLE_FLAMES = [
     prim: 1, primStyle: 0, primSize: 0.5, primRound: 0.005, iters: 2, ifsScale: 1.0,
     ifsCx: 0, ifsCy: 0, ifsCz: 0, steps: 384, stepScale: 0.85, eps: 0.0004,
     bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05, ambient: 0.30, spec: 0.6, rim: 0.7,
-    camDist: 2.6, camAzim: 0.9, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
+    tgtX: 0.5, tgtY: 0.5, tgtZ: 0.5,
+    camDist: 2.9, camAzim: 0.78, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
   }],
   ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
     prim: 2, primSize: 0.07, iters: 8, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
