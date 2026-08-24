@@ -349,6 +349,31 @@ references, so a flame of plain `linear3D` xforms costs about six slots each. Me
 Jerusalem cube: 20 xforms, 120 slots, with `uFlameFp`, `uFlameVP`, `uFlameVQ` and `uFlameVR` all
 eliminated by the compiler. WebGL2 guarantees 224.
 
+### Original flames
+
+Five that ship with the tool, written for this renderer rather than ported. All are selections of
+cells from a 3x3x3 subdivision, which is a deliberate constraint: axis-aligned maps keep the image
+boxes **disjoint**, and disjoint boxes are what make the selection rule exact rather than merely
+conservative. `tools/make-flame.mjs` writes the `.flame` from a list of maps.
+
+| flame | cells | dimension | note |
+|---|---|---|---|
+| Corner shell | 19 | 2.68 | everything but the eight corners — dense, with a bite out of every scale |
+| Checker sponge | 14 | 2.40 | cells whose coordinates sum to even; solids meet only at edges |
+| Checker weave | 14 | 2.40 | the same maps under xaos, transitions allowed only between equal parities |
+| Beam lattice | 12 | 2.26 | the twelve edge cells only, so it hollows into a cage of beams |
+| Vicsek cross | 7 | 1.77 | centre plus the six faces — the 3D cross, connected through its own middle |
+
+Two were designed, rendered, and thrown away: eight half-scale corners exactly TILE the cube, so
+a "mirror cube" of reflected corners fills solid and is not a fractal at all; and an octahedral
+flake at half scale has overlapping image boxes, which quietly downgrades the exact selection to
+a conservative one. The octaflake constraint is worth stating — for arms at distance d and scale
+s the boxes stay disjoint only when `d > 2s` and `d + s <= 1`, which forces `s < 1/3` and makes
+the result too sparse to read. Dimension below about 2.2 renders as dust here.
+
+**Checker weave** is the one to look at for xaos: identical maps to Checker sponge, restricted
+grammar, and the solid mass opens into strands.
+
 **Bundled examples.** The Flame tab has a picker for the flames in `examples/`, and opening the
 tab for the first time loads the first of them — currently **Flame IFS base**. Each entry carries
 the view settings that make it look right on load; without them an import lands on generic
