@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.25.0-plane-order';
+export const BUILD = '0.26.0-ifs-selection';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -92,6 +92,10 @@ uniform float uFlameVAmt[24];
 uniform vec4  uFlameVP[24];
 uniform vec4  uFlameVQ[24];
 uniform vec4  uFlameVR[24];
+uniform vec3  uFlameBLo[24];   // per-map image box: the region that map is responsible for
+uniform vec3  uFlameBHi[24];
+uniform vec3  uHullLo;         // the attractor's own bounding box
+uniform vec3  uHullHi;
 
 // crystal cluster primitive
 uniform float uXShards;
