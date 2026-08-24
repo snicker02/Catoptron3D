@@ -322,6 +322,20 @@ survivors differ only for an xform with non-diagonal blocks in TWO planes at onc
 case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
 import ever comes out visibly wrong.
 
+**Camera target.** The orbit camera used to be pinned to the origin, which is fine for the fold
+stack but wrong for imported flames — they are rarely centred there, and a Jerusalem cube occupies
+[0,1]^3, so it sat off to one side and orbiting swung it out of frame. Target X/Y/Z live in the
+Camera group and the orbit is around the target.
+
+**Plane order, corrected.** JWildfire does not record how its three 2D affine blocks compose, so
+the order has to be inferred — and **one reference object is not enough**. A Sierpinski tetrahedron
+only requires every map to be a 0.5-similarity, which four of the six orders satisfy; the first
+version of this parser picked `XY -> ZX -> YZ` from among them and was wrong. A Jerusalem cube is
+the discriminating case because it must be **isotropic**, and under the old order it imported as
+0.41 x 1.0 x 1.0 — squashed in x, because the XY block's translation was being scaled by a later
+block. Requiring both properties leaves exactly one order, `ZX -> XY -> YZ`, which is now used and
+asserted in the tests.
+
 **Transform count.** The cap is 24. It was 8, which silently discarded everything past the
 eighth and rendered a completely different attractor — a Jerusalem cube needs 20, and the eight
 that survived happened to be the entire coarse-scale family, so the fine structure vanished
