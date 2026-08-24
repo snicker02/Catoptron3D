@@ -148,9 +148,10 @@ export function parseFlame(text){
       T = apply(a.M, T).map((v, i) => v + a.T[i]);
     });
 
-    // the variation amount scales the affine result
-    M = M.map(v => v * k);
-    T = T.map(v => v * k);
+    // The variation AMOUNT is not folded into the affine. It belongs to the variation and the
+    // shader applies it there, so leaving it here would double-count it — and, more to the
+    // point, folding it made the file's own numbers unreadable: an xform with offset (1, -1)
+    // and amount 0.5 showed up in the panel as translation 0 and amount 1.
 
     // POST transform, if present: flame math is affine -> variations -> post affine. Ignoring a
     // post block would import silently wrong geometry, so it is composed rather than skipped.
@@ -170,12 +171,17 @@ export function parseFlame(text){
     }
 
     if(!inv3(M)){ warnings.push(`xform ${idx + 1} skipped: singular (zero determinant)`); return; }
-    const sc = opNorm(M);
+    // Contractivity is a property of the EFFECTIVE map, so the variation amount has to be
+    // included here even though it is no longer folded into the affine. Testing the bare affine
+    // reported every xform of a perfectly good 0.5 flame as non-contractive.
+    const sc = opNorm(M) * Math.abs(k);
     if(sc >= 0.999){
       warnings.push(`xform ${idx + 1} is not contractive (scale ${sc.toFixed(3)}) — ` +
                     'the attractor is unbounded and will not resolve');
     }
-    maps.push(makeXform(M, T, at.weight === undefined ? 1 : Number(at.weight)));
+    const xf = makeXform(M, T, at.weight === undefined ? 1 : Number(at.weight));
+    xf.vamt = k;                                   // the file's variation amount, shown as-is
+    maps.push(xf);
   });
 
   if(!maps.length){
@@ -309,18 +315,26 @@ function rotM(deg){
 export function resolveXform(x){
   const R = rotM(x.rot);
   const Ms = x.M.map(v => v * x.scale);
-  const M = mul(R, Ms);
-  const T = apply(R, x.T.map(v => v * x.scale)).map((v, i) => v + x.tr[i]);
-  const Mi = inv3(M);
+  // affine with the editor's offsets, WITHOUT the variation amount — this is what the shader
+  // inverts, because it applies the variation's own inverse first
+  const Aff = mul(R, Ms);
+  const Taf = apply(R, x.T.map(v => v * x.scale)).map((v, i) => v + x.tr[i]);
+  const Mi = inv3(Aff);
   if(!Mi) return null;
+  // full effective map, amount included — what the hull, the image boxes and the displayed
+  // contraction have to be computed from
+  const a = isFinite(x.vamt) ? x.vamt : 1;
+  const M = Aff.map(v => v * a);
+  const T = Taf.map(v => v * a);
   const A = [1 - M[0], -M[1], -M[2], -M[3], 1 - M[4], -M[5], -M[6], -M[7], 1 - M[8]];
   const Ai = inv3(A);
   return {
     M, T, Mi,
-    Ti: apply(Mi, T).map(v => -v),
+    Ti: apply(Mi, Taf).map(v => -v),
     fp: Ai ? apply(Ai, T) : [0, 0, 0],
     scale: opNorm(M),
     expand: opNorm(Mi),
+    base: x.T,                                     // the file's own translation, for the panel
     vari: Math.max(0, Math.min(FLAME_VARIATIONS.length - 1, x.vari | 0)),
     vamt: isFinite(x.vamt) ? x.vamt : 1,
     vp: (() => { const d = defaultVP();
