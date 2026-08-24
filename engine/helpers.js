@@ -131,6 +131,13 @@ float bisectDist(vec3 p, vec3 c1, vec3 c2){
   return abs(dot(p - 0.5 * (c1 + c2), d / L));
 }` },
 
+  sdHull: { deps: [], src: `
+float sdHull(vec3 p){
+  vec3 c = (uHullLo + uHullHi) * 0.5, h = (uHullHi - uHullLo) * 0.5;
+  vec3 q = abs(p - c) - h;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}` },
+
   // ── crystal ──
   sdShard: { deps: [], src: `
 // One crystal shard: a regular n-gonal prism with a pyramidal termination, growing along +z.
