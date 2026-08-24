@@ -608,6 +608,18 @@ const EXAMPLE_FLAMES = [
     ambient: 0.30, spec: 0.6, rim: 0.7,
     camAzim: 0.78, camElev: 0.42, palette: 5, exposure: 1.3, renderScale: 0.6
   }],
+  // Originals: 3x3x3 cell selections, all axis-aligned so the image boxes stay disjoint and
+  // the exact selection rule applies.
+  ['Corner shell (original)', 'examples/corner-shell.flame', {
+    iters: 5, bounces: 1, reflect: 0.35, renderScale: 0.6, camAzim: 0.78, camElev: 0.42 }],
+  ['Checker sponge (original)', 'examples/checker-sponge.flame', {
+    iters: 5, bounces: 1, reflect: 0.35, renderScale: 0.6, camAzim: 0.78, camElev: 0.42 }],
+  ['Checker weave (xaos)', 'examples/checker-weave.flame', {
+    iters: 5, bounces: 1, reflect: 0.35, renderScale: 0.6, camAzim: 0.78, camElev: 0.42 }],
+  ['Beam lattice (original)', 'examples/beam-lattice.flame', {
+    iters: 6, bounces: 1, reflect: 0.35, renderScale: 0.6, camAzim: 0.78, camElev: 0.42 }],
+  ['Vicsek cross (original)', 'examples/vicsek-cross.flame', {
+    iters: 6, bounces: 1, reflect: 0.35, renderScale: 0.65, camAzim: 0.78, camElev: 0.35 }],
   ['Sierpinski tetrahedron', 'examples/sierpinski-tetrahedron.flame', {
     iters: 9, camAzim: 0.9, camElev: 0.28, bounces: 1, reflect: 0.3, renderScale: 0.65
   }],
