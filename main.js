@@ -13,7 +13,7 @@ import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
-         FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP } from './engine/flame.js';
+         FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP, xaosIsTrivial } from './engine/flame.js';
 
 console.log('%c[catoptron3d] build ' + BUILD, 'color:#8ab8ff');
 
@@ -192,6 +192,7 @@ function currentCfg(){
     // NOT a ternary: this is a three-way mode, and coercing it to 0/1 silently turned
     // `image box` into `nearest fixed point`. The exact rule never reached the shader.
     flameSelect: (state.flame && state.flame.select) | 0,
+    flameXaos: resolveFlame(state.flame).xaos || null,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -654,6 +655,66 @@ function refreshFlameLabel(){
   e.style.color = w ? 'var(--warn1)' : '';
 }
 
+
+/* ── xaos ──────────────────────────────────────────────────────────────────────────────────
+   A grid of toggles: row i, column j is "may xform i be followed by xform j".
+
+   Only the on/off state is kept, not the magnitude, and that is a measured decision rather than
+   a shortcut. Over a five-million-point chaos game, changing the WEIGHTS leaves the attractor's
+   support identical — the difference shrinks to nothing as sampling improves, because weight
+   shapes DENSITY and density is not geometry. A single xaos ZERO changes the support
+   permanently. A surface renderer can only show the first thing, so that is all it stores.     */
+function renderXaos(){
+  const host = $('xaosGrid');
+  if(!host) return;
+  host.innerHTML = '';
+  const fl = state.flame;
+  const n = fl ? fl.maps.length : 0;
+  if(!n){ host.innerHTML = '<p class="empty">No transforms.</p>'; return; }
+
+  const tbl = document.createElement('table');
+  tbl.className = 'xaos';
+  const head = document.createElement('tr');
+  head.append(document.createElement('th'));
+  for(let j = 0; j < n; j++){
+    const th = document.createElement('th');
+    th.textContent = String(j + 1);
+    head.append(th);
+  }
+  tbl.append(head);
+
+  for(let i = 0; i < n; i++){
+    const tr = document.createElement('tr');
+    const rh = document.createElement('th');
+    rh.textContent = 'T' + (i + 1);
+    tr.append(rh);
+    if(!fl.maps[i].chaos) fl.maps[i].chaos = Array.from({ length: n }, () => 1);
+    while(fl.maps[i].chaos.length < n) fl.maps[i].chaos.push(1);
+    for(let j = 0; j < n; j++){
+      const td = document.createElement('td');
+      const b = document.createElement('button');
+      b.className = 'xa' + (fl.maps[i].chaos[j] ? ' on' : '');
+      b.title = 'T' + (i + 1) + ' \u2192 T' + (j + 1);
+      b.onclick = () => {
+        fl.maps[i].chaos[j] = fl.maps[i].chaos[j] ? 0 : 1;
+        renderXaos(); refreshFlameLabel(); pushHistory();
+      };
+      td.append(b);
+      tr.append(td);
+    }
+    tbl.append(tr);
+  }
+  host.append(tbl);
+
+  const note = document.createElement('p');
+  note.className = 'note';
+  const A = resolveFlame(state.flame).xaos || [];
+  note.textContent = xaosIsTrivial(A)
+    ? 'All transitions allowed \u2014 costs nothing and emits no extra code.'
+    : 'Restricted: this is a graph-directed IFS, and each transform gets its own bounding box.';
+  host.append(note);
+}
+
 /* ── flame transform editor ────────────────────────────────────────────────────────────────
    One card per xform. Each keeps its IMPORTED affine untouched and layers scale / rotate /
    translate on top, so "reset edits" restores the file exactly and a preset records the edits
@@ -700,8 +761,9 @@ function renderXforms(){
       }),
       mkBtn('\u00d7', () => {
         fl.maps.splice(i, 1);
+        fl.maps.forEach(y => { if(y.chaos) y.chaos.splice(i, 1); });
         if(!fl.maps.length) state.flame = null;
-        renderXforms(); refreshFlameLabel(); pushHistory();
+        renderXforms(); renderXaos(); refreshFlameLabel(); pushHistory();
       })
     );
     card.append(head);
@@ -751,7 +813,7 @@ function addXform(){
   if(state.flame.maps.length >= MAX_XFORMS){ setStat('8 transforms is the limit'); return; }
   state.flame.maps.push(identityXform());
   ensureFlameOp();
-  renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+  renderXforms(); renderXaos(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
 }
 
 function resetXformEdits(){
@@ -802,7 +864,7 @@ function loadFlameText(text, label, settings){
     ensureFlameOp();
     frameFlame();                              // point the camera at the attractor's own centre
     if(settings) Object.assign(state, settings);
-    renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+    renderXforms(); renderXaos(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
     if(f.warnings.length){
       console.warn('[catoptron3d] flame import:\n  ' + f.warnings.join('\n  '));
       setStat(f.maps.length + ' maps \u00b7 ' + f.warnings.length + ' skipped \u2014 see console');
@@ -820,7 +882,7 @@ function clearFlame(){
   flameAutoTried = true;
   state.flame = null;
   state.stack = state.stack.filter(sl => OPS[sl.type].name !== 'Flame IFS');
-  renderStack(); renderXforms(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
+  renderStack(); renderXforms(); renderXaos(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
   setStat('flame cleared');
 }
 
@@ -1042,6 +1104,8 @@ function loadPreset(p){
   state.stack = r.stack;
   state.flame = r.flame || null;
   renderXforms();
+  renderXaos();
+  renderXaos();
   refreshFlameLabel();
   renderStack();
   rebuildGlobals();
@@ -1393,6 +1457,7 @@ function buildPanel(){
     rd.readAsText(f);
   });
   renderXforms();
+  renderXaos();
   refreshFlameLabel();
 
   $('presetSave').onclick   = savePreset;
