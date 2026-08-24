@@ -322,6 +322,19 @@ survivors differ only for an xform with non-diagonal blocks in TWO planes at onc
 case they agree exactly. `PLANE_ORDER` in `engine/flame.js` is the single thing to change if an
 import ever comes out visibly wrong.
 
+**Transform count.** The cap is 24. It was 8, which silently discarded everything past the
+eighth and rendered a completely different attractor — a Jerusalem cube needs 20, and the eight
+that survived happened to be the entire coarse-scale family, so the fine structure vanished
+without any visible sign. A truncated or partly-skipped import now shows a warning count in the
+panel rather than only in the console.
+
+The ceiling is the fragment uniform budget rather than taste. Per xform the shader can reference
+three vec4 slots for the inverse matrix plus one each for the inverse translation, expansion,
+variation amount, fixed point and three parameter vec4s — but GLSL drops uniforms it never
+references, so a flame of plain `linear3D` xforms costs about six slots each. Measured on the
+Jerusalem cube: 20 xforms, 120 slots, with `uFlameFp`, `uFlameVP`, `uFlameVQ` and `uFlameVR` all
+eliminated by the compiler. WebGL2 guarantees 224.
+
 **Bundled examples.** The Flame tab has a picker for the flames in `examples/`, and opening the
 tab for the first time loads the first of them — currently **Flame IFS base**. Each entry carries
 the view settings that make it look right on load; without them an import lands on generic
