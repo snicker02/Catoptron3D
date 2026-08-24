@@ -724,9 +724,12 @@ function renderXforms(){
     ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
       mkSlider('Rotate ' + ax + '\u00b0', -180, 180, 0.5, x.rot[k],
                v => { x.rot[k] = v; touchXform(); }, 1)));
+    // Move shows the TOTAL translation — the file's own offset plus any edit — because a panel
+    // that reads 0 for an xform the file gives as (1, -1) is simply lying about the flame.
+    // The edit is still stored separately, so `reset edits` restores the file exactly.
     ['X', 'Y', 'Z'].forEach((ax, k) => card.append(
-      mkSlider('Move ' + ax, -2, 2, 0.005, x.tr[k],
-               v => { x.tr[k] = v; touchXform(); }, 3)));
+      mkSlider('Move ' + ax, -4, 4, 0.005, x.T[k] + x.tr[k],
+               v => { x.tr[k] = v - x.T[k]; touchXform(); }, 3)));
     host.append(card);
   });
 }
