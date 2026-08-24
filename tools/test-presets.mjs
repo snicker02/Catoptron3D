@@ -468,6 +468,36 @@ console.log('preset format v' + PRESET_VERSION + '\n');
               return r.flame === null && r.warnings.length > 0; })());
 }
 
+// 11a. THE PANEL MUST SHOW THE FILE'S OWN NUMBERS. The parser used to fold the variation amount
+//      into the affine, so an xform the file gives as offset (1, -1) with amount 0.5 displayed
+//      as translation 0 and amount 1 — arithmetically equivalent, and useless to edit from.
+{
+  const { resolveFlame } = await import(new URL('../engine/flame.js', import.meta.url).href);
+  const sq = parseFlameTop(readFileSync(
+    new URL('../examples/square-corners-linear3d.flame', import.meta.url), 'utf8'));
+  ok('the file\u2019s variation amount survives import',
+     sq.maps.every(x => Math.abs(x.vamt - 0.5) < 1e-9),
+     sq.maps.map(x => x.vamt).join(','));
+  ok('the file\u2019s translation survives import',
+     Math.abs(sq.maps[0].T[0] - 1) < 1e-9 && Math.abs(sq.maps[0].T[1] + 1) < 1e-9,
+     sq.maps[0].T.join(','));
+  // and the geometry is unchanged by moving the amount out of the affine
+  const rs = resolveFlame(sq);
+  ok('the resolved contraction still includes the amount',
+     rs.every(m => Math.abs(m.scale - 0.5) < 1e-9), rs.map(m => m.scale.toFixed(4)).join(','));
+  ok('the resolved translation still includes the amount',
+     Math.abs(rs[0].T[0] - 0.5) < 1e-9 && Math.abs(rs[0].T[1] + 0.5) < 1e-9,
+     rs[0].T.join(','));
+  // editing Move writes the offset; reset restores the file
+  const t0 = resolveFlame(sq)[0].T.slice();
+  sq.maps[0].tr[0] = 0.4 - sq.maps[0].T[0];
+  ok('editing Move changes the resolved map',
+     Math.abs(resolveFlame(sq)[0].T[0] - 0.2) < 1e-9);
+  sq.maps[0].tr = [0, 0, 0];
+  ok('reset edits restores the file exactly',
+     resolveFlame(sq)[0].T.every((v, i) => Math.abs(v - t0[i]) < 1e-12));
+}
+
 // 11b. SELECTION MODE PLUMBING. `select` is a THREE-way mode and main.js was coercing it with a
 //      ternary, so `image box` (2) silently arrived at the shader as `nearest fixed point` (1).
 //      The render stayed plausible, which is why it survived a whole round of debugging.
