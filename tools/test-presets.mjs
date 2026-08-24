@@ -428,6 +428,50 @@ console.log('preset format v' + PRESET_VERSION + '\n');
                             m.bhi[a] <= maps.hull.hi[a] + 1e-9)));
   }
 
+  // XAOS. Only the zero pattern is stored, and that is measured rather than assumed: over a
+  // five-million-point chaos game, changing WEIGHTS leaves the attractor's support identical
+  // (the difference shrinks to nothing as sampling improves) while a single xaos ZERO changes
+  // it permanently. Weight shapes density; density is not geometry.
+  {
+    const { xaosMatrix, xaosIsTrivial, stateHulls } =
+      await import(new URL('../engine/flame.js', import.meta.url).href);
+    const jx = parseFlameTop(readFileSync(
+      new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8'));
+    let r = resolveFlame(jx);
+    ok('a flame with full chaos rows reads as trivial xaos', xaosIsTrivial(r.xaos));
+
+    // per-state hulls must PARTITION, not all contain the origin. Seeding the fixed point from
+    // a point instead of iterating down from a bound made every box contain (0,0,0).
+    let ov = 0;
+    for(let i = 0; i < r.length; i++)
+      for(let j = i + 1; j < r.length; j++)
+        if([0, 1, 2].every(a => Math.min(r[i].bhi[a], r[j].bhi[a]) -
+                                Math.max(r[i].blo[a], r[j].blo[a]) > 1e-6)) ov++;
+    ok('per-state hulls are disjoint', ov === 0, ov + ' overlapping pairs');
+    ok('and they are not all anchored at the origin',
+       r.some(m => m.blo.some(v => v > 1e-6)),
+       r[0].blo.join(',') + ' | ' + r[3].blo.join(','));
+
+    // forbidding every route into a transform must make its own set collapse
+    const sq2 = parseFlameTop(readFileSync(
+      new URL('../examples/square-corners-linear3d.flame', import.meta.url), 'utf8'));
+    sq2.maps.forEach(x => { x.chaos = [1, 1, 1, 0]; });
+    const r2 = resolveFlame(sq2);
+    ok('xaos is no longer trivial', !xaosIsTrivial(r2.xaos));
+    const dead = r2[3];
+    ok('an unreachable transform collapses to a point',
+       [0, 1, 2].every(a => Math.abs(dead.bhi[a] - dead.blo[a]) < 1e-9),
+       dead.blo.join(',') + ' .. ' + dead.bhi.join(','));
+    ok('xaos joins the shader signature', flameKey(sq2) !== flameKey(jx));
+
+    // and it survives a preset
+    const rt2 = apply(capture({ ...defaults, flame: sq2, stack: [] },
+                              { ...defaults, flame: null }, OPS, 'x'),
+                      { ...defaults, flame: null }, OPS);
+    ok('a preset round-trips the xaos matrix',
+       JSON.stringify(rt2.flame.maps[0].chaos) === JSON.stringify([1, 1, 1, 0]));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
