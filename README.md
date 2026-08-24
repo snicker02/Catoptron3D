@@ -356,6 +356,17 @@ defaults and a perfectly good flame can render as a speck. They are fetched the 
 reads `README.md`, so — like the README — **the `examples/` folder has to be deployed** for them
 to load.
 
+**The panel shows the file's own numbers.** The parser used to fold each xform's variation
+amount into its affine — arithmetically equivalent, and useless to edit from: an xform the file
+gives as offset (1, -1) with amount 0.5 appeared in the panel as translation 0 and amount 1. The
+amount now stays with the variation, where the shader applies it anyway, and **Move** shows the
+TOTAL translation, the file's own offset plus any edit. The edit is still stored separately, so
+`reset edits` restores the file exactly.
+
+One consequence worth knowing: contractivity is a property of the EFFECTIVE map, so the import
+check multiplies the affine's norm by the amount. Testing the bare affine reported every xform of
+a perfectly good 0.5 flame as non-contractive.
+
 **The transform editor.** Flame IFS has its own tab beside the fold stack, with a card per
 transform: enable, duplicate, delete, and per-transform scale / rotate XYZ / move XYZ. Each card
 shows its resolved contraction and flags any transform that has reached 1.0, because a
