@@ -311,12 +311,6 @@ function renderScene(w, h){
   const bg = P.bg || DARK;
   u3(L, 'uBgTop', bg[0][0], bg[0][1], bg[0][2]);
   u3(L, 'uBgBot', bg[1][0], bg[1][1], bg[1][2]);
-  // Uniform ARRAYS are uploaded whole, at the [0] location.
-  //
-  // WebGL enumerates an array as a single active uniform named "uFlameMi[0]" — the other
-  // indices are simply not in the list. Looking up "uFlameMi[1]" in the cached location map
-  // silently returns nothing, so a per-index loop would have uploaded transform 1 and quietly
-  // dropped the rest. Passing a longer array to the [0] location fills consecutive elements.
   // Uniform ARRAYS are uploaded whole, at the [0] location, and at exactly their ACTIVE length.
   //
   // Two traps here, both silent. WebGL enumerates an array as a single active uniform named
@@ -1145,7 +1139,6 @@ function loadPreset(p){
   state.flame = r.flame || null;
   renderXforms();
   renderXaos();
-  renderXaos();
   refreshFlameLabel();
   renderStack();
   rebuildGlobals();
@@ -1451,6 +1444,21 @@ function buildGlobals(){
     if(title === 'Colour'){
       g.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                         v => { state.palette = v; }, false));
+    }
+    if(title === 'Quality'){
+      // Anti-aliasing is compile-time, so this is a select with the 'baked' tag rather than a
+      // slider: picking a new count swaps the program. It applies to SAVES and quick renders,
+      // never to the live viewport — 4x or 9x per frame while orbiting would be unusable.
+      g.append(mkSelect('Export samples',
+                        ['1\u00d71 \u2014 off', '2\u00d72', '3\u00d73', '4\u00d74'],
+                        Math.max(1, Math.round(state.aaExport)) - 1,
+                        v => { state.aaExport = v + 1; }, true));
+      const an = document.createElement('p');
+      an.className = 'note';
+      an.textContent = 'Supersampling for Render and Save PNG. A fractal has detail below one '
+        + 'pixel, so one ray per pixel sparkles. 2\u00d72 removes about a third of it for under '
+        + '3\u00d7 the cost; 3\u00d73 buys little more for twice that again.';
+      g.append(an);
     }
     rows.forEach(([key, label, min, max, step, dp]) => {
       g.append(mkSlider(label, min, max, step, state[key], v => { state[key] = v; }, dp));
