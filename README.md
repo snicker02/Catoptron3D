@@ -81,6 +81,37 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
+### Iteration depth, float32, and speckle on deep flames
+
+The backward maps **expand**, by roughly the reciprocal of the contraction each step, so any
+float32 rounding is amplified geometrically. Measured against a float64 reference on the
+Jerusalem cube, the map SELECTION diverges in:
+
+| iterations | selection differs | worst DE error |
+|---|---|---|
+| 4 | 0.16% | 1.03x |
+| 6 | 1.4% | 1.07x |
+| 8 | 9.5% | 1.8x |
+| 10 | 33% | 1.7x |
+| 12 | **62%** | **138x** |
+
+Once the accumulated error reaches the size of a cell at the current depth, which map contains the
+point stops being decidable and the choice is effectively arbitrary. **This flame resolves about
+seven levels in float32.** Past that, iterations add noise rather than detail — rendered at a
+fixed camera, speckle rises monotonically from 7.49 at 5 iterations to 8.51 at 12 while the
+visible structure does not change at all.
+
+**So the first lever is iterations matched to camera distance, not more iterations.** If a flame
+looks noisy, try fewer.
+
+**Precision guard** (Quality) freezes the backward walk once the gap between the best and
+second-best candidate falls below what the accumulated scale implies, so the estimate is less
+refined rather than wrong. In the numeric model it caps the worst-case error at about 2.4x
+instead of 138x and the depth self-limits to roughly what the arithmetic can resolve. Its visible
+effect on a typical frame is small — the dominant term at normal camera distances is sub-pixel
+detail, not selection error — so it is insurance for deep zooms rather than a cure for grain.
+Set it to 0 to disable.
+
 ### The grain in a shared render, and what it actually was
 
 A save of a Jerusalem cube stacked with Mirror shells came back visibly grainy on smooth panels,
