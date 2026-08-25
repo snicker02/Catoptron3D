@@ -316,10 +316,8 @@ ${cfg.flameSelect === 2 ? `      // IMAGE BOX: for an affine IFS the exact rule 
       float d = dot(dv, dv) * bias;`}
 ${useXaos ? `      // this map may only be the predecessor if xaos allows it to lead to the last one
       if(gFlamePrev < 0 || FLAME_ALLOW[${k} * FLAME_N + gFlamePrev] == 1){
-        if(d < best){ second = best; best = d; bq = q; bex = ex; bsel = ${k}; }
-        else if(d < second){ second = d; }
-      }` : `      if(d < best){ second = best; best = d; bq = q; bex = ex; bsel = ${k}; }
-      else if(d < second){ second = d; }`}
+        if(d < best){ best = d; bq = q; bex = ex; bsel = ${k}; }
+      }` : `      if(d < best){ best = d; bq = q; bex = ex; bsel = ${k}; }`}
     }`).join('');
 
   // Complex arithmetic, emitted once and only when a flame is present.
@@ -357,32 +355,13 @@ vec2 cacosh(vec2 z){ return clog(z + csqrtc(csqr(z) - vec2(1.0, 0.0))); }
 vec2 catanh(vec2 z){ return 0.5 * clog(cdiv(vec2(1.0, 0.0) + z, vec2(1.0, 0.0) - z)); }
 `;
 
-  const flameSrc = `\n#define FLAME_N ${cfg.flameN}\nint gFlamePrev;\nbool gFlameFrozen;` + (cfg.flameN ? allowSrc + BOXSEL + CPLX + `
+  const flameSrc = `\n#define FLAME_N ${cfg.flameN}\nint gFlamePrev;` + (cfg.flameN ? allowSrc + BOXSEL + CPLX + `
 vec3 flameFold(vec3 p, inout float s, inout vec4 trap, float bias){
-  // PRECISION GUARD.
-  //
-  // The backward maps EXPAND, by about the reciprocal of the contraction each step, so any
-  // float32 rounding is amplified geometrically. Once the accumulated error reaches the size of
-  // a cell at the current depth, which map contains the point stops being decidable and the
-  // choice becomes arbitrary — measured against float64, the selection diverged in 62% of
-  // samples at 12 iterations and the estimate was wrong by up to 138x. That is the dense speckle
-  // on deep flames, and it gets WORSE with more iterations rather than better.
-  //
-  // So the walk freezes when the gap between the best and second-best candidate falls below the
-  // error the accumulated scale implies. The estimate is then simply less refined instead of
-  // wrong: worst-case error drops from 138x to about 2.4x, and the depth self-limits to what the
-  // arithmetic can actually resolve.
-  if(gFlameFrozen) return p;
   float best = 1e18;
-  float second = 1e18;
   vec3 bq = p;
   float bex = 1.0;
   int bsel = -1;
 ${flameBlocks}
-${cfg.flameSelect === 2 ? `  if(second < 1e17 && (second - best) <= uFlamePrec * max(s, 1.0)){
-    gFlameFrozen = true;               // the choice is noise from here on
-    return p;
-  }` : ''}
   gFlamePrev = bsel;
   s *= bex;
   trap = min(trap, vec4(abs(bq), dot(bq, bq)));
@@ -431,7 +410,6 @@ ${useShell ? `  // Shell: the signed distance to the SURFACE of a solid rather t
 float mapT(vec3 p, out vec4 trap, out float safe){
   vec3 p0 = p;                        // the original sample point, for escape-time feedback
   gFlamePrev = -1;                    // no map has been undone yet, so nothing is forbidden
-  gFlameFrozen = false;
   float s = 1.0;
   float seam = 1e9;
   trap = vec4(1e9);
@@ -484,13 +462,24 @@ vec3 calcNormal(vec3 p, float t){
 }
 ${cfg.ao ? `
 float calcAO(vec3 p, vec3 n){
+  // The probe offsets are a fraction of uAoRadius, NOT fixed world units.
+  //
+  // They used to be hard-coded at 0.01 to 0.49, which is a sensible reach for an object about
+  // two units across and far too long for anything smaller or more finely divided: each probe
+  // then lands in a different part of the structure and the occlusion sweeps through a range as
+  // the surface curves, painting fan-shaped ripples across faces that are actually flat. That
+  // reads as a rendering fault and is really a mis-scaled shading term.
+  //
+  // The estimate is also clamped at zero before use. Inside the surface it goes negative, and a
+  // negative d makes (h - d) exceed h, over-occluding exactly where the estimator is weakest.
   float o = 0.0, w = 1.0;
+  float R = max(uAoRadius, 1e-4);
   for(int i = 0; i < 5; i++){
-    float h = 0.01 + 0.12 * float(i);
-    o += max(0.0, h - map(p + n * h)) * w;
+    float h = R * (0.02 + 0.24 * float(i));
+    o += max(0.0, h - max(map(p + n * h), 0.0)) * w / R;
     w *= 0.7;
   }
-  return clamp(1.0 - uAoStr * o * 2.5, 0.0, 1.0);
+  return clamp(1.0 - uAoStr * o * 1.25, 0.0, 1.0);
 }` : ''}
 ${cfg.shadow ? `
 float softShadow(vec3 p, vec3 l){
