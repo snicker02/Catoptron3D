@@ -521,6 +521,11 @@ float march(vec3 ro, vec3 rd, float side, out float glowAcc){
     float d = side * mapT(p, tr, safe);
     if(d < uEps * t) return t;                 // hit test: TRUE distance only
     ${cfg.glow ? 'glowAcc += 1.0 / (1.0 + d * d * 340.0);' : ''}
+    // Step scale may be taken all the way to 0. The max() with uEps*t is what keeps the ray
+    // moving at all: at 0 this stops being sphere tracing and becomes a FIXED-step marcher that
+    // advances one hit-epsilon per iteration. That is the most robust setting against tunnelling
+    // through thin sheets, and by far the slowest — it needs a large step budget to reach
+    // anything, and uMaxDist is what stops it hanging.
     t += max(side * safe * uStepScale, uEps * t);
     if(t > uMaxDist) break;
   }
