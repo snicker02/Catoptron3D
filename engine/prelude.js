@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.34.0-hit-refinement';
+export const BUILD = '0.36.0-drop-precision-guard';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -36,7 +36,6 @@ uniform float uMaxDist;
 uniform float uStepScale;   // safety multiplier — lower it when a 'bound' op misbehaves
 uniform float uEps;
 uniform float uNormEps;
-uniform float uFlamePrec;   // precision guard: freeze the backward walk when the map choice
                             // is no longer decidable in float32     // normal-probe offset, as a multiple of the hit epsilon
 
 // IFS recursion (the fold stack is the map; this is the per-pass contraction)
@@ -56,6 +55,7 @@ uniform float uPrimThick;   // shell / frame bar thickness
 uniform vec3  uLightDir;
 uniform float uAmbient;
 uniform float uAoStr;
+uniform float uAoRadius;    // AO probe reach, in world units
 uniform float uSpec;
 uniform float uReflect;
 uniform float uFresnel;
