@@ -603,6 +603,39 @@ console.log('preset format v' + PRESET_VERSION + '\n');
      emitted.join(',') === 'image,fixed,box', emitted.join(','));
 }
 
+// 11c. CLIPBOARD. A preset travels as JSON, as a bare payload, or inside a share URL, and a
+//      person pasting one should not have to know which they are holding.
+{
+  const { parseAny } = await import(new URL('../engine/preset.js', import.meta.url).href);
+  const p = { v: 1, name: 'clip', s: { camDist: 3.25 }, k: [] };
+  const json = JSON.stringify(p, null, 1);
+  const enc = encode(p);
+  const url = 'https://snicker02.github.io/Catoptron3D/#p=' + enc;
+  const good = (label, text) => ok('accepts ' + label, (() => {
+    try { const r = parseAny(text); return r.name === 'clip' && Math.abs(r.s.camDist - 3.25) < 1e-9; }
+    catch(e){ return false; }
+  })());
+  good('pretty JSON', json);
+  good('compact JSON', JSON.stringify(p));
+  good('a bare encoded payload', enc);
+  good('a full share URL', url);
+  good('a URL with surrounding whitespace', '\n  ' + url + '  \n');
+  good('a URL carrying other params', 'https://x.io/a?b=1#p=' + enc);
+
+  const bad = (label, text) => ok('rejects ' + label, (() => {
+    try { parseAny(text); return false; } catch(e){ return true; }
+  })());
+  bad('an empty clipboard', '   ');
+  bad('ordinary prose', 'have a look at this render');
+  bad('malformed JSON', '{"v":1,');
+  bad('a payload that is not a preset', encode('not an object').slice(0, 12) + '!!');
+
+  // the message has to say what went wrong, since this is the one place a person pastes blind
+  let msg = '';
+  try { parseAny('hello'); } catch(e){ msg = e.message; }
+  ok('and explains what it expected', /JSON|link|payload/.test(msg), msg);
+}
+
 // 12. DOM LINT. getElementById returns the FIRST match, so a duplicated id silently wires every
 //     handler to the wrong element and the visible control does nothing. That is exactly what
 //     happened when the flame panel moved rails and the old copy was left behind: the buttons
