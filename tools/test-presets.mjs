@@ -6,7 +6,7 @@ import { OPS } from '../engine/ops.js';
 import { capture, apply, encode, decode, migrate, PRESET_VERSION } from '../engine/preset.js';
 import { assemble, signature } from '../engine/assemble.js';
 import { readFileSync } from 'node:fs';
-import { parseFlame as parseFlameTop } from '../engine/flame.js';
+import { parseFlame as parseFlameTop, resolveFlame as resolveFlameTop } from '../engine/flame.js';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -625,6 +625,38 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     !refs.has(i) && !['c', 'boot', 'panel', 'panelR', 'hud', 'topbar'].includes(i));
   ok('no orphaned ids left in the markup', unused.length === 0, unused.join(', '));
 
+  // EVERY tunable state key needs a control. A string replace that silently fails to match adds
+  // the state and the plumbing but no widget, and the feature then exists everywhere except the
+  // UI — which has happened three times: the AA control, the flame buttons, the boot starter.
+  {
+    const a = js.indexOf('const state = {');
+    const lit = js.slice(a, js.indexOf('\n};', a) + 3);
+    const st = (new Function(lit + '\nreturn state;'))();
+
+    // keys driven by direct interaction or by structure rather than by a widget
+    const NO_WIDGET = new Set([
+      'stack', 'flame',                 // structural
+      'aa',                             // internal: the live viewport is always 1
+      'camAzim', 'camElev',             // mouse drag and WASD
+      'aspect', 'exportSize',           // built in buildPanel, not the group schema
+      'seed'                            // lives in the Crystal group via schema (checked below)
+    ]);
+    // the panel-building region: group schema + every mkSelect/mkSlider call
+    // A key is controllable if it is named in the GROUPS schema (those rows assign through
+    // state[key] inside a loop, so there is no literal state.key = to search for), or if a
+    // panel builder writes state.key directly.
+    const groups = js.slice(js.indexOf('const GROUPS = ['), js.indexOf('const RIGHT_GROUPS'));
+    const builders = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function section('));
+    const missing = Object.keys(st).filter(k =>
+      !NO_WIDGET.has(k) && !groups.includes("'" + k + "'") &&
+      !builders.includes('state.' + k + ' ='));
+    ok('every tunable state key has a control', missing.length === 0, missing.join(', '));
+
+    // and the one that was actually missing
+    const build = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function buildPanel()'));
+    ok('Export samples is reachable from the Quality panel', build.includes('aaExport'));
+  }
+
   // the bundled example flames must actually exist at the paths the panel fetches
   const paths = [...js.matchAll(/'(examples\/[\w.-]+\.flame)'/g)].map(m => m[1]);
   ok('example flames are referenced', paths.length >= 2, paths.join(', '));
@@ -633,6 +665,26 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     catch(e){ return true; }
   });
   ok('every referenced example flame is present on disk', bad.length === 0, bad.join(', '));
+  // the originals must stay well-formed: contractive, unit-cube hull, and — because they are all
+  // axis-aligned 3x3x3 cell selections — DISJOINT image boxes, which is what keeps the exact
+  // selection rule exact rather than merely conservative
+  ['corner-shell', 'checker-sponge', 'checker-weave', 'beam-lattice', 'vicsek-cross']
+    .forEach(nm => {
+      const g = parseFlameTop(readFileSync(
+        new URL('../examples/' + nm + '.flame', import.meta.url), 'utf8'));
+      const rr = resolveFlameTop(g);
+      let ov = 0;
+      for(let i = 0; i < rr.length; i++)
+        for(let j = i + 1; j < rr.length; j++)
+          if([0, 1, 2].every(a => Math.min(rr[i].bhi[a], rr[j].bhi[a]) -
+                                  Math.max(rr[i].blo[a], rr[j].blo[a]) > 1e-6)) ov++;
+      const unit = rr.hull.lo.every(v => Math.abs(v + 1) < 1e-9) &&
+                   rr.hull.hi.every(v => Math.abs(v - 1) < 1e-9);
+      ok(nm + ': contractive, unit hull, ' + rr.length + ' disjoint boxes',
+         rr.every(m => m.scale < 0.999) && unit && ov === 0 && g.warnings.length === 0,
+         'overlaps ' + ov + ', warnings ' + g.warnings.length);
+    });
+
   ok('every bundled example parses', paths.every(pth => {
     try {
       const g = parseFlameTop(readFileSync(new URL('../' + pth, import.meta.url), 'utf8'));
