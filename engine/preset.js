@@ -159,3 +159,32 @@ function unb64url(s){
 
 export function encode(preset){ return b64url(JSON.stringify(preset)); }
 export function decode(str){ return JSON.parse(unb64url(str)); }
+
+// Accept whatever is on the clipboard.
+//
+// A preset travels in three shapes — the JSON itself, the bare base64url payload, and a full
+// share URL — and a person pasting one has no reason to care which they happen to be holding.
+// Refusing two of the three because they are not the one shape a reader expected would be a
+// self-inflicted failure, so this sniffs instead. Order matters: a URL is checked first because
+// its payload is base64url and would otherwise be mistaken for one.
+export function parseAny(text){
+  const t = String(text || '').trim();
+  if(!t) throw new Error('nothing on the clipboard');
+
+  const url = /[#&]p=([A-Za-z0-9\-_]+)/.exec(t);
+  if(url) return migrate(decode(url[1]));
+
+  if(t[0] === '{'){
+    let o;
+    try { o = JSON.parse(t); }
+    catch(e){ throw new Error('that looks like JSON but will not parse'); }
+    return migrate(o);
+  }
+
+  if(/^[A-Za-z0-9\-_]+={0,2}$/.test(t)){
+    try { return migrate(decode(t)); }
+    catch(e){ throw new Error('that is not a preset payload'); }
+  }
+
+  throw new Error('not a preset — expected JSON, a share link, or an encoded payload');
+}
