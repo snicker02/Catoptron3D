@@ -47,10 +47,10 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2, normEps: 1.0, flamePrec: 1e-6,
+  aa: 1, aaExport: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
-  lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
+  lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, aoRadius: 0.5, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
   transp: 0.0, ior: 1.48, absorb: 0.6, disp: 0.0,
   // colour
@@ -109,6 +109,7 @@ const GROUPS = [
     ['lightElev', 'Light elev\u00b0', -20, 90, 1,   0],
     ['ambient',   'Ambient',   0, 1,   0.005, 3],
     ['ao',        'AO',        0, 3,   0.01,  2],
+    ['aoRadius',  'AO radius', 0.01, 3, 0.005, 3],
     ['shadow',    'Shadows',   0, 1,   0.01,  2],
     ['spec',      'Specular',  0, 2,   0.01,  2],
     ['rim',       'Rim',       0, 3,   0.01,  2],
@@ -152,8 +153,7 @@ const GROUPS = [
     ['stepScale',   'Step scale', 0, 1.0, 0.005, 3],
     ['maxDist',     'Max distance', 4, 120, 0.5,  1],
     ['eps',         'Hit epsilon', 0.0002, 0.006, 0.0001, 4],
-    ['normEps',     'Normal smoothing', 0.25, 16, 0.25, 2],
-    ['flamePrec',   'Precision guard', 0, 0.0001, 0.000002, 6],
+    ['normEps',     'Normal smoothing', 0.5, 4, 0.05, 2],
     ['renderScale', 'Resolution',  0.25, 1.5, 0.05, 2]
   ]]
 ];
@@ -306,7 +306,6 @@ function renderScene(w, h){
   u1(L, 'uStepScale', state.stepScale);
   u1(L, 'uEps', state.eps);
   u1(L, 'uNormEps', state.normEps);
-  u1(L, 'uFlamePrec', state.flamePrec);
 
   u3(L, 'uIfsCenter', state.ifsCx, state.ifsCy, state.ifsCz);
   u1(L, 'uIfsScale', state.ifsScale);
@@ -323,6 +322,7 @@ function renderScene(w, h){
   u3(L, 'uLightDir', Math.cos(la) * Math.cos(le), Math.sin(le), Math.sin(la) * Math.cos(le));
   u1(L, 'uAmbient', state.ambient);
   u1(L, 'uAoStr', state.ao);
+  u1(L, 'uAoRadius', state.aoRadius);
   u1(L, 'uSpec', state.spec);
   u1(L, 'uReflect', state.reflect);
   u1(L, 'uFresnel', state.fresnel);
@@ -435,7 +435,7 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2, normEps: 1.0, flamePrec: 1e-6,
+           aa: 1, aaExport: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1535,6 +1535,13 @@ function buildGlobals(){
                         v => { state.palette = v; }, false));
     }
     if(title === 'Quality'){
+      const nn = document.createElement('p');
+      nn.className = 'note';
+      nn.textContent = 'Normal smoothing widens the probe used for shading normals. Past about '
+        + '2 it stops hiding noise and starts SMEARING real geometry \u2014 thin fins and combs '
+        + 'blur into smooth fan-shaped arcs that look like a rendering fault but are the '
+        + 'structure itself, averaged away. Leave it at 1 unless a surface is visibly noisy.';
+      g.append(nn);
       const sn = document.createElement('p');
       sn.className = 'note';
       sn.textContent = 'Step scale 0 turns the marcher into fixed-step: it advances one hit '
