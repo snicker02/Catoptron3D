@@ -81,6 +81,32 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
+### When the image boxes tile without gaps
+
+A shared preset built on `Flame IFS base` rendered as dense speckle at every setting. The cause is
+in the flame, not the renderer, and it is worth understanding because it is easy to build by
+accident.
+
+Its four corner maps are at scale exactly **0.5** with translations at the four corners, so they
+**tile the square perfectly**. Their image boxes therefore leave NO gap, and box containment can
+never prove a point is outside — the recursion has nothing to separate. Measured over the
+bounding volume, the estimate is negative (reported as inside) for the median sample, and the
+union of boxes covers 62% of the hull at scale 0.5, dropping to 38% at scale 0.40.
+
+What that means in practice: the estimate resolves the surface only to about `hull / 2^iters`.
+At 10 iterations that is roughly 2e-3, which at a camera distance of 1.6 is about one pixel —
+so every pixel straddles the resolution limit and the result is speckle rather than surface.
+
+More iterations do not rescue it: measured on that preset, speckle rose from 50.0 at 10
+iterations to 53.2 at 12 and 54.1 at 14, because float32 error is growing faster than the extra
+level refines. **A tiling IFS is intrinsically hard for a distance estimator.** Pulling the corner
+scale slightly below 0.5 opens real gaps and gives the recursion something to bite on.
+
+**Step scale now goes to 0.** At 0 this stops being sphere tracing and becomes a fixed-step
+marcher advancing one hit epsilon per step — the most robust setting against thin sheets and by
+far the slowest. With a normal step budget the ray never arrives and the frame renders empty, so
+March steps has to go up a long way to match.
+
 ### Iteration depth, float32, and speckle on deep flames
 
 The backward maps **expand**, by roughly the reciprocal of the contraction each step, so any
