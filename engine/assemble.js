@@ -513,19 +513,33 @@ float softShadow(vec3 p, vec3 l){
 // transmitted ray has to be tracked through the medium, not just bent at the entry face.
 float march(vec3 ro, vec3 rd, float side, out float glowAcc){
   float t = uMinDist;
+  float tPrev = t, dPrev = 1e30;
   glowAcc = 0.0;
   for(int i = 0; i < ${cfg.steps}; i++){
     vec3 p = ro + rd * t;
     vec4 tr;
     float safe;
     float d = side * mapT(p, tr, safe);
-    if(d < uEps * t) return t;                 // hit test: TRUE distance only
+    if(d < uEps * t){
+      // SECANT REFINEMENT. The hit test fires as soon as the estimate drops below the epsilon,
+      // so the reported distance is wherever the discrete steps happened to land — not where the
+      // surface is. With a generous epsilon that quantisation is visible as concentric BANDS
+      // across smooth areas, which look nothing like noise and are often mistaken for one.
+      //
+      // The previous sample and this one bracket the crossing, so interpolate to where the
+      // estimate would reach zero. It costs no extra map() call and decouples the reported hit
+      // from the step pattern, which is what removes the banding.
+      float denom = dPrev - d;
+      float th = (denom > 1e-20) ? (tPrev + (t - tPrev) * dPrev / denom) : t;
+      return clamp(th, tPrev, t + max(d, 0.0));
+    }
     ${cfg.glow ? 'glowAcc += 1.0 / (1.0 + d * d * 340.0);' : ''}
     // Step scale may be taken all the way to 0. The max() with uEps*t is what keeps the ray
     // moving at all: at 0 this stops being sphere tracing and becomes a FIXED-step marcher that
     // advances one hit-epsilon per iteration. That is the most robust setting against tunnelling
     // through thin sheets, and by far the slowest — it needs a large step budget to reach
     // anything, and uMaxDist is what stops it hanging.
+    tPrev = t; dPrev = d;
     t += max(side * safe * uStepScale, uEps * t);
     if(t > uMaxDist) break;
   }
