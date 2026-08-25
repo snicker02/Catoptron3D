@@ -149,7 +149,7 @@ const GROUPS = [
     ['sat',       'Saturation', 0, 2,   0.01,  2]
   ]],
   ['Quality', [
-    ['stepScale',   'Step scale',  0.15, 1.0, 0.01,  2],
+    ['stepScale',   'Step scale', 0, 1.0, 0.005, 3],
     ['maxDist',     'Max distance', 4, 120, 0.5,  1],
     ['eps',         'Hit epsilon', 0.0002, 0.006, 0.0001, 4],
     ['normEps',     'Normal smoothing', 0.25, 16, 0.25, 2],
@@ -1535,6 +1535,14 @@ function buildGlobals(){
                         v => { state.palette = v; }, false));
     }
     if(title === 'Quality'){
+      const sn = document.createElement('p');
+      sn.className = 'note';
+      sn.textContent = 'Step scale 0 turns the marcher into fixed-step: it advances one hit '
+        + 'epsilon per step instead of a safe distance. That is the most robust setting against '
+        + 'thin sheets and by far the slowest \u2014 with a normal step budget the ray never '
+        + 'reaches anything and the frame comes out empty, so raise March steps a long way '
+        + '(or lower Max distance) if you use it.';
+      g.append(sn);
       // Anti-aliasing is compile-time, so this is a select with the 'baked' tag rather than a
       // slider: picking a new count swaps the program. It applies to SAVES and quick renders,
       // never to the live viewport — 4x or 9x per frame while orbiting would be unusable.
