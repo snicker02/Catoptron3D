@@ -62,6 +62,40 @@ A top bar and two rails.
 **Top bar:** New, quick render (R), pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide
 panels (H), fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
 
+**Anti-aliasing.** A distance-estimated fractal carries detail far below one pixel, so a single
+ray per pixel does not just give hard edges — it **sparkles**, because which side of a feature the
+ray lands on flips with any tiny shift. Supersampling is the only cure; no post filter recovers
+detail a ray never sampled. Measured on Corner shell, with an isolated-pixel metric:
+
+| samples | sparkle | cost |
+|---|---|---|
+| 1x1 | 7.93 | 1.0x |
+| 2x2 | 5.25 (-34%) | 2.8x |
+| 3x3 | 4.48 (-43%) | 5.9x |
+
+It is compile-time, so at 1 it emits nothing and costs nothing. The **viewport stays at 1** and
+**Export samples** (Quality) drives saves and quick renders — paying 4x while orbiting would be
+miserable, paying it once for a saved image is free. The average is taken in LINEAR light before
+exposure and tonemapping, which stops one bright sub-sample dominating its neighbours.
+
+Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
+another 9 points for twice that again. 2x2 is the default.
+
+### What was checked when "rendering errors" were reported
+
+Worth recording, because the answer was not where it was expected.
+
+- **The flame estimator is sound.** Against a 400,000-point ground-truth sample of the Jerusalem
+  cube, DE/true distance has a median of **0.994** — tight, not conservative — and exceeds 1.0 in
+  0.01% of samples, which is consistent with finite-sample error in the ground truth rather than
+  with a real overshoot. Iteration count made no difference to this.
+- **Step starvation is minor.** Instrumenting the marcher to separate rays that HIT, rays that
+  legitimately escaped to the background, and rays that ran out of budget mid-scene: starvation
+  is 1.8% on Folded frames, 3.5% on Menger sponge, and 0% on the flame scenes.
+- **All three gates still pass** on every operator and stack.
+
+So there was no estimator or marcher fault to find. What there was, was no anti-aliasing at all.
+
 **Quick render** answers "what will the save actually look like?". The viewport is deliberately
 undersampled — Resolution defaults below 1 and drops to 55% of that while you drag — so the live
 image is softer and noisier than a file. Measured on the default scene, mean neighbour detail runs
