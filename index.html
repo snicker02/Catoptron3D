@@ -66,7 +66,11 @@ body{background:var(--page);overflow:hidden;font-family:var(--disp);color:var(--
   font-family:var(--mono);font-size:9px;color:var(--hint);letter-spacing:.02em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw;
 }
-@media (max-width:1100px){#topbar .khint,#topbar .sub{display:none}}
+/* The side panel used to repeat the title and the control hint. It no longer does, so the top
+   bar is the only place they live: drop the subtitle first and hold on to the hint much longer,
+   since nothing else shows it. */
+@media (max-width:1100px){#topbar .sub{display:none}}
+@media (max-width:820px){#topbar .khint{display:none}}
 
 #help{
   position:fixed;inset:44px 0 0 0;z-index:280;display:none;
@@ -126,13 +130,6 @@ body{background:var(--page);overflow:hidden;font-family:var(--disp);color:var(--
 #panel::-webkit-scrollbar{width:5px}
 #panel::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:3px}
 
-header h1{
-  font-size:15px;font-weight:700;letter-spacing:.34em;color:var(--h1a);
-  text-transform:uppercase;
-}
-header .sub{font-family:var(--mono);font-size:10.5px;color:var(--h1b);margin-top:3px;letter-spacing:.04em}
-header .hint{font-family:var(--mono);font-size:10px;color:var(--hint);margin-top:7px;line-height:1.7}
-hr{border:none;border-top:1px solid var(--edge2);margin:14px 0}
 
 .group{margin-bottom:16px}
 .group h2{
@@ -208,6 +205,7 @@ button.xa.on{background:var(--ice1);border-color:var(--ice1)}
   color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
 }
 .tin::placeholder{color:var(--note)}
+textarea.tin{resize:vertical;line-height:1.4;min-height:52px}
 .tin:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .savelink{margin-top:6px}
 .savelink a{font-family:var(--mono);font-size:10px;color:var(--ice1);text-decoration:underline;
@@ -291,12 +289,7 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
 <canvas id="c"></canvas>
 <div id="boot">A S S E M B L I N G &nbsp; E S T I M A T O R</div>
 <div id="panel">
-  <header>
-    <h1>Catoptron 3D</h1>
-    <div class="sub">folded space, raymarched</div>
-    <div class="hint">Drag to orbit &middot; scroll to zoom &middot; WASD orbit &middot; Q/E dolly &middot; Shift for fine</div>
-  </header>
-  <hr>
+  <div class="ptitle">Image &amp; output</div>
 
   <div class="group">
     <h2>Image &amp; export</h2>
@@ -328,10 +321,22 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
       <button id="presetDelete">delete</button>
     </div>
     <div class="row" style="margin-top:5px">
+      <button id="presetCopy">copy</button>
+      <button id="presetPaste">paste</button>
+    </div>
+    <div class="row" style="margin-top:5px">
       <button id="presetExport">export .json</button>
       <button id="presetImport">import</button>
     </div>
     <input type="file" id="presetFile" accept="application/json,.json" hidden>
+    <div id="pasteBox" style="display:none;margin-top:6px">
+      <textarea id="pasteText" class="tin" rows="4" spellcheck="false"
+                placeholder="paste a preset, a share link, or an encoded payload"></textarea>
+      <div class="row" style="margin-top:4px">
+        <button id="pasteLoad">load</button>
+        <button id="pasteCancel">cancel</button>
+      </div>
+    </div>
     <p class="note">Saved in this browser. Export or copy a link to keep a look anywhere.
     A loaded image is not part of a preset — reload it after.</p>
   </div>
