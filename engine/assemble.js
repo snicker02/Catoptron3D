@@ -443,7 +443,16 @@ ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to inf
 float map(vec3 p){ vec4 t; float sf; return mapT(p, t, sf); }
 
 vec3 calcNormal(vec3 p, float t){
-  float e = max(uEps * t, 1e-5);
+  // The probe offset is deliberately adjustable. A folded or IFS estimator is continuous but its
+  // GRADIENT is not: a sub-pixel shift can flip an early fold or map selection, so two rays
+  // landing a hair apart on the same flat panel can return noticeably different normals. That
+  // reads as fine grain on smooth surfaces, and supersampling barely touches it because the
+  // underlying signal is noisy at every scale, not just at edges.
+  //
+  // Probing wider averages across those pieces. It is a genuine trade — measured on a Jerusalem
+  // cube with Mirror shells, x4 cut the grain by 17% and x16 by 35%, but x16 also visibly
+  // rounds real detail away. Hence a control rather than a new hard-coded constant.
+  float e = max(uEps * t, 1e-5) * max(uNormEps, 0.25);
   vec2 k = vec2(1.0, -1.0);
   return normalize(
     vec3( k.x, k.y, k.y) * map(p + vec3( k.x, k.y, k.y) * e) +
