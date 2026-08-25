@@ -74,7 +74,7 @@ detail a ray never sampled. Measured on Corner shell, with an isolated-pixel met
 | 3x3 | 4.48 (-43%) | 5.9x |
 
 It is compile-time, so at 1 it emits nothing and costs nothing. The **viewport stays at 1** and
-**Export samples** (Quality) drives saves and quick renders — paying 4x while orbiting would be
+**Export samples** in the Quality group drives saves and quick renders — paying 4x while orbiting would be
 miserable, paying it once for a saved image is free. The average is taken in LINEAR light before
 exposure and tonemapping, which stops one bright sub-sample dominating its neighbours.
 
