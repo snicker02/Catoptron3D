@@ -81,20 +81,58 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
-### Concentric arcs are the PALETTE, not the geometry
+### Regressions from my own fixes
 
-Smooth areas of a render came back covered in fine concentric bands, reported as artifacts, and
-nothing done to the estimator, the step scale, the sample count or the precision guard touched
-them. They are not a rendering fault at all.
+Two changes made while chasing artifacts made things worse, and both are recorded because the
+pattern matters: each was justified by a NUMBER rather than by looking at the render.
 
-`palette()` is a cosine palette, so it CYCLES. **Colour** is driven by the orbit trap times
-**Trap scale**, and the trap value varies smoothly across a surface — so a trap scale above about
-1 wraps the palette more than once across a single face and paints contour rings on it. Measured
-on the reported frame with the geometry held fixed: luminance ripple 15.45 at trap scale 1.135,
-6.75 at 0.25, and 6.29 at 0. The shape does not change; only the colouring does.
+- **Precision guard** (removed in 0.36.0). Justified by a numeric model showing worst-case error
+  dropping from 138x to 2.4x. In practice boxes tie exactly on their shared boundary planes, the
+  walk froze at the first step, and the unrefined estimate read as a hit — false specks along
+  those planes, up 55% on a simple flame.
+- **Normal smoothing at high values** (capped in 0.35.1). Offered as a remedy for grain, and at
+  16 it smears real fins into smooth arcs that then get reported as artifacts.
 
-If a surface looks like a topographic map, **lower Trap scale**. That is the control, and no
-amount of extra sampling will help because the bands are exactly what was asked for.
+The **secant hit refinement** from the same period was checked the same way and kept: it slightly
+REDUCES specks, 751 to 661 on the same scene.
+
+### Smooth fan-shaped arcs are smeared geometry
+
+Large smooth panels crossed by fan-shaped arcs were reported as artifacts across several rounds.
+Two earlier explanations here were **wrong** and are recorded because the wrong turns are
+instructive: they are not orbit-trap colour banding (they survive with the trap at zero and a flat
+grey palette), and the panels are not phantom geometry.
+
+The panels are **real**. Four maps at scale exactly 0.5 translated to the four corners tile the
+square, so the attractor genuinely contains filled sheets. Dropping the corner scale to 0.47 makes
+them vanish because it changes the artwork, not because it fixes a fault.
+
+The arcs on them are **real geometry too** — thin fins thrown off by the flip in the fifth map —
+**smeared by Normal smoothing**. At a setting of 16 the probe reaches about 0.15 world units,
+comparable to the structure itself, so the shading normal averages across many fins and they
+collapse into smooth arcs. Set it back to 1 and the arcs resolve into the fins they always were.
+
+Normal smoothing is therefore capped at 4 rather than 16, with a note saying so. It was
+introduced as a remedy for grain, and at high values it trades one artifact for a worse one.
+
+**A caution about measuring this.** A ripple or speckle metric counts high-frequency variation,
+and RESOLVING real detail raises it just as noise does. Measured on the fin region, the score went
+UP from 8.4 to 34.0 when the smearing was removed and the picture got better. Two conclusions here
+were drawn from that number moving in the wrong direction; the images had to be looked at.
+
+### Phantom panels and exact tiling
+
+### Ambient occlusion was mis-scaled
+
+Isolating each shading term on that same frame — AO 6.61, specular 6.61, rim 6.81, fog 6.64
+against a control of 6.61 — showed AO was the only one that mattered: switching it off dropped
+the ripple to 3.25.
+
+The probe offsets were hard-coded at 0.01 to 0.49 **world units**, a reasonable reach for an
+object two units across and far too long for anything smaller or finely divided. Each probe then
+lands in a different part of the structure and the occlusion sweeps as the surface curves. There
+is now an **AO radius** control, the offsets are a fraction of it, and the estimate is clamped at
+zero before use so a negative value cannot over-occlude exactly where the estimator is weakest.
 
 ### Hit refinement
 
@@ -157,13 +195,14 @@ visible structure does not change at all.
 **So the first lever is iterations matched to camera distance, not more iterations.** If a flame
 looks noisy, try fewer.
 
-**Precision guard** (Quality) freezes the backward walk once the gap between the best and
-second-best candidate falls below what the accumulated scale implies, so the estimate is less
-refined rather than wrong. In the numeric model it caps the worst-case error at about 2.4x
-instead of 138x and the depth self-limits to roughly what the arithmetic can resolve. Its visible
-effect on a typical frame is small — the dominant term at normal camera distances is sub-pixel
-detail, not selection error — so it is insurance for deep zooms rather than a cure for grain.
-Set it to 0 to disable.
+**A precision guard was tried and removed.** It froze the backward walk once the gap between the
+best and second-best candidate fell below what the accumulated scale implied. In the numeric model
+it capped worst-case error at 2.4x instead of 138x, which is why it shipped — but boxes tie
+EXACTLY on their shared boundary planes, so the gap is zero there and the walk froze at the first
+step, returning an unrefined negative estimate that the marcher reads as a hit. The result was
+false surfaces scattered along box-boundary planes: measured on a five-xform flame, isolated
+specks in empty space rose from 648 to 1006, a 55% increase. A model that says a change is safe
+is not the same as a render that says so.
 
 ### The grain in a shared render, and what it actually was
 
