@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.32.1-panel-header';
+export const BUILD = '0.33.0-precision-guard';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -35,7 +35,9 @@ uniform float uMinDist;
 uniform float uMaxDist;
 uniform float uStepScale;   // safety multiplier — lower it when a 'bound' op misbehaves
 uniform float uEps;
-uniform float uNormEps;     // normal-probe offset, as a multiple of the hit epsilon
+uniform float uNormEps;
+uniform float uFlamePrec;   // precision guard: freeze the backward walk when the map choice
+                            // is no longer decidable in float32     // normal-probe offset, as a multiple of the hit epsilon
 
 // IFS recursion (the fold stack is the map; this is the per-pass contraction)
 uniform vec3  uIfsCenter;
