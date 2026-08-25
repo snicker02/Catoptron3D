@@ -282,7 +282,7 @@ def gate_de():
                        ('uPrimThick', 0.03), ('uIfsScale', 1.9),
                        ('uSeed', 1337.0), ('uXShards', 6.0), ('uXFacets', 6.0), ('uXLen', 1.1),
                        ('uXRad', 0.10), ('uXTip', 0.55), ('uXSpread', 1.0), ('uXVary', 0.8), ('uStepScale', 1.0), ('uEps', 0.002),
-                       ('uBailout', 6.0),
+                       ('uBailout', 6.0), ('uNormEps', 1.0), ('uFlamePrec', 1e-6),
                        ('uCityStreet', 0.28), ('uCityHeight', 0.9), ('uCityVar', 0.7),
                        ('uCityDetail', 0.0), ('uSun', 0.0), ('uHaze', 0.0)):
             if u in prog: prog[u].value = val
