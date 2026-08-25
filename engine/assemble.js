@@ -91,6 +91,7 @@ export function normalizeCfg(cfg){
     seamSurf: !!cfg.seamSurf,
     primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
     transp:   !!cfg.transp,
+    aa:       Math.max(1, Math.min(4, cfg.aa | 0 || 1)),
     flameN:   Math.max(0, Math.min(MAX_XFORMS, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
@@ -116,7 +117,7 @@ export function signature(cfg){
   }).join(',');
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
-          c.transp ? 1 : 0, c.disp ? 1 : 0, c.bounces,
+          c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.bounces,
           c.flameN, c.flameSelect, (c.flameVars || []).join(''),
           (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
@@ -625,29 +626,51 @@ cfg.bounces > 0 ? `
 }
 
 void main(){
-  vec2 uv = (gl_FragCoord.xy - uRes * 0.5) / uRes.y;
-
   vec3 ro = uCamPos;
   vec3 fwd = normalize(uCamTgt - ro);
   vec3 upRef = abs(fwd.y) > 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
   vec3 rgt = normalize(cross(fwd, upRef));
   vec3 upv = cross(rgt, fwd);
-  vec3 rd = normalize(rgt * uv.x + upv * uv.y + fwd * uFov);
 
   float glowTot = 0.0;
-  vec3 col;
-${cfg.disp ? `
-  // Dispersion: three separate paths, one per channel, with the IOR spread around uIOR.
-  // Three full traces is the honest cost of the effect; there is no cheap version that bends
-  // the channels differently without actually following them.
-  col = vec3(0.0);
+  vec3 col = vec3(0.0);
+  vec2 uv = (gl_FragCoord.xy - uRes * 0.5) / uRes.y;
+${cfg.aa > 1 ? `
+  // ANTI-ALIASING by supersampling. A distance-estimated fractal has detail far below one pixel,
+  // so a single ray per pixel does not merely produce hard edges — it SPARKLES, because which
+  // side of a feature the ray lands on changes with any tiny shift. Averaging an ordered grid of
+  // sub-pixel rays is the only thing that fixes it; there is no filter that recovers detail the
+  // ray never sampled.
+  //
+  // The average is taken in LINEAR light, before exposure and tonemapping, which is what keeps a
+  // bright sub-sample from dominating its neighbours.
+  const float AA = ${cfg.aa}.0;
+  for(int sy = 0; sy < ${cfg.aa}; sy++){
+    for(int sx = 0; sx < ${cfg.aa}; sx++){
+      vec2 off = (vec2(float(sx), float(sy)) + 0.5) / AA - 0.5;
+      vec2 uvs = (gl_FragCoord.xy + off - uRes * 0.5) / uRes.y;
+      vec3 rd = normalize(rgt * uvs.x + upv * uvs.y + fwd * uFov);
+      float g = 0.0;
+${cfg.disp ? `      vec3 c3 = vec3(0.0);
+      for(int ch = 0; ch < 3; ch++){
+        float gg;
+        float iorCh = uIOR + (float(ch) - 1.0) * uDisp * 0.06;
+        c3[ch] = tracePath(ro, rd, iorCh, gg)[ch];
+        g = max(g, gg);
+      }
+      col += c3;` : `      col += tracePath(ro, rd, uIOR, g);`}
+      glowTot = max(glowTot, g);
+    }
+  }
+  col /= AA * AA;` : `
+  vec3 rd = normalize(rgt * uv.x + upv * uv.y + fwd * uFov);
+${cfg.disp ? `  col = vec3(0.0);
   for(int ch = 0; ch < 3; ch++){
     float g;
     float iorCh = uIOR + (float(ch) - 1.0) * uDisp * 0.06;
     col[ch] = tracePath(ro, rd, iorCh, g)[ch];
     glowTot = max(glowTot, g);
-  }` : `
-  col = tracePath(ro, rd, uIOR, glowTot);`}
+  }` : `  col = tracePath(ro, rd, uIOR, glowTot);`}`}
 
   ${cfg.glow ? 'col += palette(clamp(glowTot * 0.03 + uTrapShift, 0.0, 1.0)) * glowTot * uGlow * 0.02;' : ''}
 
