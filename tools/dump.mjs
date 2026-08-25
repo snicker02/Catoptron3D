@@ -54,6 +54,16 @@ PRIMS.forEach((_, pi) => {
     });
   });
 });
+[1, 2, 3, 4].forEach(a => shaders.push({
+  label: `aa ${a}x${a}`,
+  src: assemble({ stack: [], prim: 0, iters: 4, steps: 128, ao: true, shadow: false,
+                  glow: false, bounces: 1, aa: a })
+}));
+shaders.push({
+  label: 'aa 2x2 + glass + dispersion',
+  src: assemble({ stack: [], prim: 6, iters: 2, steps: 128, ao: true, shadow: false, glow: true,
+                  bounces: 3, transp: true, disp: true, aa: 2 })
+});
 [[true, true, true], [false, false, false], [true, false, true]].forEach((f, k) => {
   shaders.push({
     label: `feature flags ${k}`,
