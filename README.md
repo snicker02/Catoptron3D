@@ -81,6 +81,33 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
+### Concentric arcs are the PALETTE, not the geometry
+
+Smooth areas of a render came back covered in fine concentric bands, reported as artifacts, and
+nothing done to the estimator, the step scale, the sample count or the precision guard touched
+them. They are not a rendering fault at all.
+
+`palette()` is a cosine palette, so it CYCLES. **Colour** is driven by the orbit trap times
+**Trap scale**, and the trap value varies smoothly across a surface — so a trap scale above about
+1 wraps the palette more than once across a single face and paints contour rings on it. Measured
+on the reported frame with the geometry held fixed: luminance ripple 15.45 at trap scale 1.135,
+6.75 at 0.25, and 6.29 at 0. The shape does not change; only the colouring does.
+
+If a surface looks like a topographic map, **lower Trap scale**. That is the control, and no
+amount of extra sampling will help because the bands are exactly what was asked for.
+
+### Hit refinement
+
+The hit test fires as soon as the estimate drops below the epsilon, so the reported distance is
+wherever the discrete steps happened to land rather than where the surface is. With a generous
+epsilon that quantisation shows up as banding across smooth areas.
+
+The previous sample and the current one bracket the crossing, so the marcher now interpolates to
+where the estimate would reach zero. It costs no extra `map()` call. Measured on the default
+scene, it changes the image by a mean of 23.3 levels at a large epsilon and 6.9 at the default —
+but only when steps are far apart: at a step scale of 0.145 the samples are already close
+together and it makes no measurable difference.
+
 ### When the image boxes tile without gaps
 
 A shared preset built on `Flame IFS base` rendered as dense speckle at every setting. The cause is
