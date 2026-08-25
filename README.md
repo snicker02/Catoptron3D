@@ -139,6 +139,13 @@ The app opens on **Folded frames** — the recursive box-frame lattice — which
 in Starters. Startup and **New** both apply that starter rather than building the state inline,
 so the thing the app opens with is always reachable again.
 
+The side panels carry only their own section title; the app name, subtitle and control hint live
+once, in the top bar. They used to be repeated at the head of the left rail, which cost vertical
+space and said the same thing twice.
+
+One consequence: the top bar is now the ONLY place the control hint appears, so it is held on to
+much longer at narrow widths — the subtitle drops below 1100px and the hint only below 820px.
+
 The right rail opens on **Fold stack**. Opening the **Flame IFS** tab with nothing loaded pulls
 in the default example, once per session — an empty transform editor reads as broken. Clearing
 the flame deliberately is remembered, so coming back to the tab leaves it cleared.
@@ -627,13 +634,25 @@ is a shear rather than a similarity. Flames are carried inside presets.
 
 ## Presets
 
-Three routes out of the tool:
+Four routes out of the tool:
 
 - **Named slots** in localStorage — fast, this browser only.
 - **`.json` export / import** — portable and archivable.
+- **`copy` / `paste`** — the preset JSON straight to and from the clipboard.
 - **`copy link`** — the whole look encodes into a URL hash. A real state (59 keys plus a fold
   stack) comes to about 350 characters, so a look is something you can paste to yourself.
   Opening a link applies it before the default stack is built.
+
+**Paste accepts all three shapes** — the JSON, a bare encoded payload, or a full share URL — and
+sniffs which it has rather than demanding one. Someone pasting a preset has no reason to know
+which form they happen to be holding, and refusing two of the three would be a self-inflicted
+failure. A URL is checked first, because its payload is base64url and would otherwise be mistaken
+for a bare one.
+
+Both buttons fall back to an inline paste box. That is not just an error path: **Firefox does not
+expose `clipboard.readText` to page scripts at all**, and Safari only grants it inside a gesture,
+so for some browsers the box is the only route. Copy falls back the same way, pre-filled and
+selected, so it is one keystroke away.
 
 The format lives in `engine/preset.js` and is deliberately **pure** — no DOM, no storage, no
 globals — so it is unit-tested headlessly by `tools/test-presets.mjs` (32 tests) rather than only
