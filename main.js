@@ -46,6 +46,7 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
+  aa: 1, aaExport: 2,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
@@ -200,6 +201,7 @@ function currentCfg(){
     shadow: state.shadow > 0.001,
     glow:   state.glow > 0.001,
     seamSurf: state.seamSurf > 0.5,
+    aa: renderAA,
     transp: state.transp > 0.005 && state.bounces > 0,
     disp:   state.transp > 0.005 && state.bounces > 0 && state.disp > 0.005,
     feedback: Math.round(state.feedback),
@@ -249,6 +251,11 @@ function camPos(){
           state.tgtY + se * state.camDist,
           state.tgtZ + Math.sin(state.camAzim) * ce * state.camDist];
 }
+
+// Supersampling is compile-time, so switching it swaps the program. The viewport stays at 1 and
+// exports use the higher count: paying 4x or 9x per frame while orbiting would be miserable,
+// paying it once for a saved image is free.
+let renderAA = 1;
 
 function renderScene(w, h){
   if(!cur || !cur.locs) return;
@@ -403,7 +410,8 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
+           aa: 1, aaExport: 2,
+  steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
            ambient: 0.30, spec: 0.55, rim: 0.9,
@@ -946,7 +954,9 @@ function quickRender(){
     setStat('that size was refused by the browser');
     return;
   }
+  renderAA = Math.max(1, Math.round(state.aaExport));
   renderScene(cv.width, cv.height);
+  renderAA = 1;
   if(gl.isContextLost()){
     setStat('context lost \u2014 reload and try a smaller window');
     return;
@@ -1800,7 +1810,10 @@ function savePNG(){
     setStat('export size refused by the browser');
     return;
   }
+  renderAA = Math.max(1, Math.round(state.aaExport));
+  setStat('rendering ' + sw + '\u00d7' + sh + ' at ' + renderAA + '\u00d7' + renderAA + ' samples\u2026');
   renderScene(cv.width, cv.height);
+  renderAA = 1;
   if(gl.isContextLost()){
     setStat('context lost during export \u2014 reload and try a smaller window');
     return;
