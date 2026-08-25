@@ -652,6 +652,19 @@ console.log('preset format v' + PRESET_VERSION + '\n');
       !builders.includes('state.' + k + ' ='));
     ok('every tunable state key has a control', missing.length === 0, missing.join(', '));
 
+    // EXPORT MUST BUILD ITS OWN PROGRAM. Setting the sample count alone did nothing: `cur` is
+    // only swapped by syncProgram, which runs in the frame loop, so export and quick render kept
+    // using the viewport's 1x1 program and every save came out unsampled whatever was selected.
+    const exp = js.slice(js.indexOf('function savePNG()'));
+    ok('savePNG requests a program for its sample count', exp.includes('withSamples('));
+    const qr = js.slice(js.indexOf('function quickRender()'), js.indexOf('function releasePreview()'));
+    ok('quick render does too', qr.includes('withSamples('));
+    ok('neither sets renderAA without requesting a program',
+       !/renderAA = Math\.max\([^)]*\);\s*\n\s*renderScene/.test(js));
+    const ws = js.slice(js.indexOf('function withSamples('), js.indexOf('function renderScene('));
+    ok('withSamples waits for a parallel compile', ws.includes('while(!r.ready'));
+    ok('and falls back to 1x1 rather than the wrong program', ws.includes('renderAA = 1;'));
+
     // and the one that was actually missing
     const build = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function buildPanel()'));
     ok('Export samples is reachable from the Quality panel', build.includes('aaExport'));
