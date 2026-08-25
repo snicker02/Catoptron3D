@@ -10,7 +10,8 @@ import { BUILD } from './engine/prelude.js';
 import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
 import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
 import { createProgramCache } from './engine/glcache.js';
-import { capture, apply as applyPreset, encode, decode, PRESET_VERSION } from './engine/preset.js';
+import { capture, apply as applyPreset, encode, decode, parseAny,
+         PRESET_VERSION } from './engine/preset.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
          FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP, xaosIsTrivial } from './engine/flame.js';
@@ -1254,6 +1255,60 @@ function importPresetFile(file){
   rd.readAsText(file);
 }
 
+async function copyText(text, what){
+  try {
+    await navigator.clipboard.writeText(text);
+    setStat(what + ' copied \u00b7 ' + text.length + ' chars');
+    return true;
+  } catch(e){
+    // Clipboard write needs a secure context and a user gesture, and can still be refused.
+    // Fall back to the paste box, pre-filled and selected, so the copy is one keystroke away.
+    showPasteBox(text, true);
+    setStat('press Ctrl+C \u2014 the ' + what + ' is selected below');
+    return false;
+  }
+}
+
+function copyPreset(){
+  const name = ($('presetName').value || '').trim();
+  copyText(JSON.stringify(currentPreset(name), null, 1), 'preset');
+}
+
+async function pastePreset(){
+  // Firefox does not expose readText to page scripts at all, and Safari only grants it inside a
+  // gesture, so a paste box is not a fallback for an error case — for some browsers it is the
+  // only path. Try the API, then offer the box.
+  let text = null;
+  try {
+    if(navigator.clipboard && navigator.clipboard.readText) text = await navigator.clipboard.readText();
+  } catch(e){ text = null; }
+  if(text && text.trim()){ applyPastedText(text); return; }
+  showPasteBox('', false);
+  setStat('paste into the box, then press load');
+}
+
+function applyPastedText(text){
+  try {
+    const p = parseAny(text);
+    loadPreset(p);
+    if(p.name) $('presetName').value = p.name;
+    pushHistory();
+    hidePasteBox();
+  } catch(e){
+    setStat(e.message);
+  }
+}
+
+function showPasteBox(fill, selectAll){
+  const box = $('pasteBox');
+  box.style.display = '';
+  const ta = $('pasteText');
+  ta.value = fill || '';
+  ta.focus();
+  if(selectAll) ta.select();
+}
+function hidePasteBox(){ $('pasteBox').style.display = 'none'; $('pasteText').value = ''; }
+
 async function copyLink(){
   const name = ($('presetName').value || '').trim();
   const hash = encode(currentPreset(name));
@@ -1552,6 +1607,10 @@ function buildPanel(){
   $('presetImport').onclick = () => $('presetFile').click();
   $('presetFile').addEventListener('change', e => importPresetFile(e.target.files[0]));
   $('presetLink').onclick   = copyLink;
+  $('presetCopy').onclick   = copyPreset;
+  $('presetPaste').onclick  = pastePreset;
+  $('pasteLoad').onclick    = () => applyPastedText($('pasteText').value);
+  $('pasteCancel').onclick  = hidePasteBox;
   refreshPresetList();
 
   const starters = $('starters');
