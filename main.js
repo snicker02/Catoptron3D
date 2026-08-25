@@ -46,7 +46,7 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2,
+  aa: 1, aaExport: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, shadow: 0.0,
@@ -151,6 +151,7 @@ const GROUPS = [
     ['stepScale',   'Step scale',  0.15, 1.0, 0.01,  2],
     ['maxDist',     'Max distance', 4, 120, 0.5,  1],
     ['eps',         'Hit epsilon', 0.0002, 0.006, 0.0001, 4],
+    ['normEps',     'Normal smoothing', 0.25, 16, 0.25, 2],
     ['renderScale', 'Resolution',  0.25, 1.5, 0.05, 2]
   ]]
 ];
@@ -252,10 +253,36 @@ function camPos(){
           state.tgtZ + Math.sin(state.camAzim) * ce * state.camDist];
 }
 
-// Supersampling is compile-time, so switching it swaps the program. The viewport stays at 1 and
+// Supersampling is compile-time, so switching it swaps the PROGRAM. The viewport stays at 1 and
 // exports use the higher count: paying 4x or 9x per frame while orbiting would be miserable,
 // paying it once for a saved image is free.
 let renderAA = 1;
+
+// Render once with a different sample count.
+//
+// Setting renderAA alone is not enough and quietly did nothing: `cur` is only swapped by
+// syncProgram, which runs in the FRAME LOOP. Export and quick render call renderScene directly,
+// so they kept using the program built for the viewport — every save came out at 1x1 however
+// the control was set. The program has to be requested here, and waited for, because a parallel
+// compile is not ready on the same tick.
+function withSamples(n, draw){
+  const prevAA = renderAA, prevCur = cur, prevSig = curSig;
+  renderAA = Math.max(1, Math.min(4, Math.round(n)));
+  let ok = true;
+  if(renderAA !== 1){
+    const cfg = currentCfg();
+    let r = cache.request(cfg);
+    // KHR_parallel_shader_compile links off-thread, so poll the cache until it reports ready.
+    // This blocks, which is right for an export: a save that silently used the wrong program is
+    // worse than one that takes an extra moment.
+    const t0 = performance.now();
+    while(!r.ready && !r.error && performance.now() - t0 < 8000) r = cache.request(cfg);
+    if(r.ready) cur = r.entry;
+    else { ok = false; renderAA = 1; cur = prevCur; }
+  }
+  try { draw(renderAA, ok); }
+  finally { renderAA = prevAA; cur = prevCur; curSig = prevSig; }
+}
 
 function renderScene(w, h){
   if(!cur || !cur.locs) return;
@@ -276,6 +303,7 @@ function renderScene(w, h){
   u1(L, 'uMaxDist', state.maxDist);
   u1(L, 'uStepScale', state.stepScale);
   u1(L, 'uEps', state.eps);
+  u1(L, 'uNormEps', state.normEps);
 
   u3(L, 'uIfsCenter', state.ifsCx, state.ifsCy, state.ifsCz);
   u1(L, 'uIfsScale', state.ifsScale);
@@ -404,7 +432,7 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2,
+           aa: 1, aaExport: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -948,16 +976,20 @@ function quickRender(){
     setStat('that size was refused by the browser');
     return;
   }
-  renderAA = Math.max(1, Math.round(state.aaExport));
-  renderScene(cv.width, cv.height);
-  renderAA = 1;
+  let usedAA = 1;
+  withSamples(state.aaExport, (n, ok) => {
+    usedAA = n;
+    if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
+    renderScene(cv.width, cv.height);
+  });
   if(gl.isContextLost()){
     setStat('context lost \u2014 reload and try a smaller window');
     return;
   }
   previewHold = true;
   $('quickBtn').classList.add('on');
-  setStat('preview ' + sw + '\u00d7' + sh + ' \u2014 this is the save. Any change resumes live.');
+  setStat('preview ' + sw + '\u00d7' + sh + ' at ' + usedAA + '\u00d7' + usedAA +
+          ' \u2014 this is the save. Any change resumes live.');
 }
 
 // Anything that changes the image drops the hold, so the preview can never go quietly stale.
@@ -1818,10 +1850,11 @@ function savePNG(){
     setStat('export size refused by the browser');
     return;
   }
-  renderAA = Math.max(1, Math.round(state.aaExport));
-  setStat('rendering ' + sw + '\u00d7' + sh + ' at ' + renderAA + '\u00d7' + renderAA + ' samples\u2026');
-  renderScene(cv.width, cv.height);
-  renderAA = 1;
+  setStat('rendering ' + sw + '\u00d7' + sh + '\u2026');
+  withSamples(state.aaExport, (n, ok) => {
+    if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
+    renderScene(cv.width, cv.height);
+  });
   if(gl.isContextLost()){
     setStat('context lost during export \u2014 reload and try a smaller window');
     return;
