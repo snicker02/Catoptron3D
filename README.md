@@ -81,6 +81,34 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
+### The grain in a shared render, and what it actually was
+
+A save of a Jerusalem cube stacked with Mirror shells came back visibly grainy on smooth panels,
+made at 4x4 samples. Two separate things:
+
+**1. The sample count never reached the export.** `cur` is only swapped by `syncProgram`, which
+runs in the FRAME LOOP; export and quick render call `renderScene` directly, so they kept using
+the viewport's 1x1 program. Every save was unsampled no matter what the control said. Export now
+requests its own program and WAITS for it — a parallel compile is not ready on the same tick —
+and falls back to 1x1 with a message rather than silently using the wrong one.
+
+**2. Supersampling would not have fixed that image anyway.** With it genuinely applied, 2x2 cut
+the grain on that scene by 7%, against 34% on a cleaner one. The difference is diagnostic: this
+is not edge aliasing. A folded or IFS estimator is continuous but its GRADIENT is not — a
+sub-pixel shift can flip an early fold or map selection, so two rays landing a hair apart on the
+same flat panel return different normals. The signal is noisy at every scale, so averaging
+sub-samples barely helps.
+
+What does help is probing the normal wider, which averages across those pieces. **Normal
+smoothing** (Quality) is a multiplier on the probe offset. Measured on that scene: x4 cuts the
+grain 17%, x16 cuts it 35% — but x16 also visibly rounds real detail away, so it is a trade
+rather than a free win.
+
+Also worth knowing, because it is backwards from the obvious guess: on that scene a step scale of
+**0.15 produced LESS grain than 0.85** (7.61 against 10.69). A small step lands the hit point
+closer to the true surface, which steadies the normal. Step starvation was only 3% at 0.15 and
+0% at 0.85, so starvation was not the cause either.
+
 ### What was checked when "rendering errors" were reported
 
 Worth recording, because the answer was not where it was expected.
