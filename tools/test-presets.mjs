@@ -703,6 +703,30 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('Export samples is reachable from the Quality panel', build.includes('aaExport'));
   }
 
+  // README LINT. The help panel renders this file, so it is shipped documentation. It has been
+  // corrupted once by an edit whose slice bounds were reversed — Python's replace('', x) inserts
+  // x between EVERY character — which produced a 100 MB file with one section repeated 68,889
+  // times. Cheap structural checks catch that class of damage and the stale-content class too.
+  {
+    const md = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+    ok('README is a sane size', md.length > 20000 && md.length < 200000, md.length + ' chars');
+
+    const heads = (md.match(/^#{1,3} .*$/gm) || []);
+    const dupes = heads.filter((h, i) => heads.indexOf(h) !== i);
+    ok('README has no duplicated headings', dupes.length === 0, [...new Set(dupes)].slice(0, 3).join(' | '));
+
+    ok('README has no empty sections', !/^#{2,3} .*\n\n(?=#{2,3} )/m.test(md));
+
+    // claims that later evidence overturned must not survive in the file
+    const stale = [
+      [/arcs are the PALETTE/i, 'the arcs were shown NOT to be the palette'],
+      [/phantom geometry/i, 'the filled sheets were shown to be real'],
+      [/\*\*Precision guard\*\* \(Quality\)/, 'the precision guard was removed']
+    ].filter(([re]) => re.test(md));
+    ok('README carries no superseded explanations', stale.length === 0,
+       stale.map(x => x[1]).join('; '));
+  }
+
   // the bundled example flames must actually exist at the paths the panel fetches
   const paths = [...js.matchAll(/'(examples\/[\w.-]+\.flame)'/g)].map(m => m[1]);
   ok('example flames are referenced', paths.length >= 2, paths.join(', '));
