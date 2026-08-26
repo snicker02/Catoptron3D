@@ -81,172 +81,6 @@ exposure and tonemapping, which stops one bright sub-sample dominating its neigh
 Diminishing returns are steep: 2x2 buys most of the improvement at under 3x the cost, 3x3 buys
 another 9 points for twice that again. 2x2 is the default.
 
-### Regressions from my own fixes
-
-Two changes made while chasing artifacts made things worse, and both are recorded because the
-pattern matters: each was justified by a NUMBER rather than by looking at the render.
-
-- **Precision guard** (removed in 0.36.0). Justified by a numeric model showing worst-case error
-  dropping from 138x to 2.4x. In practice boxes tie exactly on their shared boundary planes, the
-  walk froze at the first step, and the unrefined estimate read as a hit — false specks along
-  those planes, up 55% on a simple flame.
-- **Normal smoothing at high values** (capped in 0.35.1). Offered as a remedy for grain, and at
-  16 it smears real fins into smooth arcs that then get reported as artifacts.
-
-The **secant hit refinement** from the same period was checked the same way and kept: it slightly
-REDUCES specks, 751 to 661 on the same scene.
-
-### Smooth fan-shaped arcs are smeared geometry
-
-Large smooth panels crossed by fan-shaped arcs were reported as artifacts across several rounds.
-Two earlier explanations here were **wrong** and are recorded because the wrong turns are
-instructive: they are not orbit-trap colour banding (they survive with the trap at zero and a flat
-grey palette), and the panels are not phantom geometry.
-
-The panels are **real**. Four maps at scale exactly 0.5 translated to the four corners tile the
-square, so the attractor genuinely contains filled sheets. Dropping the corner scale to 0.47 makes
-them vanish because it changes the artwork, not because it fixes a fault.
-
-The arcs on them are **real geometry too** — thin fins thrown off by the flip in the fifth map —
-**smeared by Normal smoothing**. At a setting of 16 the probe reaches about 0.15 world units,
-comparable to the structure itself, so the shading normal averages across many fins and they
-collapse into smooth arcs. Set it back to 1 and the arcs resolve into the fins they always were.
-
-Normal smoothing is therefore capped at 4 rather than 16, with a note saying so. It was
-introduced as a remedy for grain, and at high values it trades one artifact for a worse one.
-
-**A caution about measuring this.** A ripple or speckle metric counts high-frequency variation,
-and RESOLVING real detail raises it just as noise does. Measured on the fin region, the score went
-UP from 8.4 to 34.0 when the smearing was removed and the picture got better. Two conclusions here
-were drawn from that number moving in the wrong direction; the images had to be looked at.
-
-### Phantom panels and exact tiling
-
-### Ambient occlusion was mis-scaled
-
-Isolating each shading term on that same frame — AO 6.61, specular 6.61, rim 6.81, fog 6.64
-against a control of 6.61 — showed AO was the only one that mattered: switching it off dropped
-the ripple to 3.25.
-
-The probe offsets were hard-coded at 0.01 to 0.49 **world units**, a reasonable reach for an
-object two units across and far too long for anything smaller or finely divided. Each probe then
-lands in a different part of the structure and the occlusion sweeps as the surface curves. There
-is now an **AO radius** control, the offsets are a fraction of it, and the estimate is clamped at
-zero before use so a negative value cannot over-occlude exactly where the estimator is weakest.
-
-### Hit refinement
-
-The hit test fires as soon as the estimate drops below the epsilon, so the reported distance is
-wherever the discrete steps happened to land rather than where the surface is. With a generous
-epsilon that quantisation shows up as banding across smooth areas.
-
-The previous sample and the current one bracket the crossing, so the marcher now interpolates to
-where the estimate would reach zero. It costs no extra `map()` call. Measured on the default
-scene, it changes the image by a mean of 23.3 levels at a large epsilon and 6.9 at the default —
-but only when steps are far apart: at a step scale of 0.145 the samples are already close
-together and it makes no measurable difference.
-
-### When the image boxes tile without gaps
-
-A shared preset built on `Flame IFS base` rendered as dense speckle at every setting. The cause is
-in the flame, not the renderer, and it is worth understanding because it is easy to build by
-accident.
-
-Its four corner maps are at scale exactly **0.5** with translations at the four corners, so they
-**tile the square perfectly**. Their image boxes therefore leave NO gap, and box containment can
-never prove a point is outside — the recursion has nothing to separate. Measured over the
-bounding volume, the estimate is negative (reported as inside) for the median sample, and the
-union of boxes covers 62% of the hull at scale 0.5, dropping to 38% at scale 0.40.
-
-What that means in practice: the estimate resolves the surface only to about `hull / 2^iters`.
-At 10 iterations that is roughly 2e-3, which at a camera distance of 1.6 is about one pixel —
-so every pixel straddles the resolution limit and the result is speckle rather than surface.
-
-More iterations do not rescue it: measured on that preset, speckle rose from 50.0 at 10
-iterations to 53.2 at 12 and 54.1 at 14, because float32 error is growing faster than the extra
-level refines. **A tiling IFS is intrinsically hard for a distance estimator.** Pulling the corner
-scale slightly below 0.5 opens real gaps and gives the recursion something to bite on.
-
-**Step scale now goes to 0.** At 0 this stops being sphere tracing and becomes a fixed-step
-marcher advancing one hit epsilon per step — the most robust setting against thin sheets and by
-far the slowest. With a normal step budget the ray never arrives and the frame renders empty, so
-March steps has to go up a long way to match.
-
-### Iteration depth, float32, and speckle on deep flames
-
-The backward maps **expand**, by roughly the reciprocal of the contraction each step, so any
-float32 rounding is amplified geometrically. Measured against a float64 reference on the
-Jerusalem cube, the map SELECTION diverges in:
-
-| iterations | selection differs | worst DE error |
-|---|---|---|
-| 4 | 0.16% | 1.03x |
-| 6 | 1.4% | 1.07x |
-| 8 | 9.5% | 1.8x |
-| 10 | 33% | 1.7x |
-| 12 | **62%** | **138x** |
-
-Once the accumulated error reaches the size of a cell at the current depth, which map contains the
-point stops being decidable and the choice is effectively arbitrary. **This flame resolves about
-seven levels in float32.** Past that, iterations add noise rather than detail — rendered at a
-fixed camera, speckle rises monotonically from 7.49 at 5 iterations to 8.51 at 12 while the
-visible structure does not change at all.
-
-**So the first lever is iterations matched to camera distance, not more iterations.** If a flame
-looks noisy, try fewer.
-
-**A precision guard was tried and removed.** It froze the backward walk once the gap between the
-best and second-best candidate fell below what the accumulated scale implied. In the numeric model
-it capped worst-case error at 2.4x instead of 138x, which is why it shipped — but boxes tie
-EXACTLY on their shared boundary planes, so the gap is zero there and the walk froze at the first
-step, returning an unrefined negative estimate that the marcher reads as a hit. The result was
-false surfaces scattered along box-boundary planes: measured on a five-xform flame, isolated
-specks in empty space rose from 648 to 1006, a 55% increase. A model that says a change is safe
-is not the same as a render that says so.
-
-### The grain in a shared render, and what it actually was
-
-A save of a Jerusalem cube stacked with Mirror shells came back visibly grainy on smooth panels,
-made at 4x4 samples. Two separate things:
-
-**1. The sample count never reached the export.** `cur` is only swapped by `syncProgram`, which
-runs in the FRAME LOOP; export and quick render call `renderScene` directly, so they kept using
-the viewport's 1x1 program. Every save was unsampled no matter what the control said. Export now
-requests its own program and WAITS for it — a parallel compile is not ready on the same tick —
-and falls back to 1x1 with a message rather than silently using the wrong one.
-
-**2. Supersampling would not have fixed that image anyway.** With it genuinely applied, 2x2 cut
-the grain on that scene by 7%, against 34% on a cleaner one. The difference is diagnostic: this
-is not edge aliasing. A folded or IFS estimator is continuous but its GRADIENT is not — a
-sub-pixel shift can flip an early fold or map selection, so two rays landing a hair apart on the
-same flat panel return different normals. The signal is noisy at every scale, so averaging
-sub-samples barely helps.
-
-What does help is probing the normal wider, which averages across those pieces. **Normal
-smoothing** (Quality) is a multiplier on the probe offset. Measured on that scene: x4 cuts the
-grain 17%, x16 cuts it 35% — but x16 also visibly rounds real detail away, so it is a trade
-rather than a free win.
-
-Also worth knowing, because it is backwards from the obvious guess: on that scene a step scale of
-**0.15 produced LESS grain than 0.85** (7.61 against 10.69). A small step lands the hit point
-closer to the true surface, which steadies the normal. Step starvation was only 3% at 0.15 and
-0% at 0.85, so starvation was not the cause either.
-
-### What was checked when "rendering errors" were reported
-
-Worth recording, because the answer was not where it was expected.
-
-- **The flame estimator is sound.** Against a 400,000-point ground-truth sample of the Jerusalem
-  cube, DE/true distance has a median of **0.994** — tight, not conservative — and exceeds 1.0 in
-  0.01% of samples, which is consistent with finite-sample error in the ground truth rather than
-  with a real overshoot. Iteration count made no difference to this.
-- **Step starvation is minor.** Instrumenting the marcher to separate rays that HIT, rays that
-  legitimately escaped to the background, and rays that ran out of budget mid-scene: starvation
-  is 1.8% on Folded frames, 3.5% on Menger sponge, and 0% on the flame scenes.
-- **All three gates still pass** on every operator and stack.
-
-So there was no estimator or marcher fault to find. What there was, was no anti-aliasing at all.
-
 **Quick render** answers "what will the save actually look like?". The viewport is deliberately
 undersampled — Resolution defaults below 1 and drops to 55% of that while you drag — so the live
 image is softer and noisier than a file. Measured on the default scene, mean neighbour detail runs
@@ -292,6 +126,105 @@ Two rails, split by what they answer:
 Either rail toggles independently. Above 1180px they reserve width and the canvas is centred in
 what is left; below that they overlay, because two 300px rails plus a usable viewport does not
 fit on a tablet — at 1024px reserving both would leave a 424px slot to work in.
+
+## Artifacts: what each one actually was
+
+Several rounds of reported artifacts were chased here, with a lot of wrong turns. The wrong turns
+are kept deliberately — most were reasonable and all of them were wrong in the same *way*.
+
+**The method that finally worked, and should be first every time:** render the raw depth and the
+raw normal with no shading and no colour. On the frame in question both were clean — depth smooth
+across the flat panels, normals a uniform constant. That eliminated the estimator, the marcher and
+the normal calculation in a single render and left only shading terms. Guessing at colour,
+precision and step scale in turn had cost several rounds before that.
+
+### Mottled flat faces — ambient occlusion
+
+Switching shading terms off one at a time on a flat panel: **AO 16.5 to 10.1**, reflections 16.5
+to 17.1. Almost entirely AO. No radius removes it — 16.5 at 0.5, 16.3 at 0.1, 17.7 at 0.02 — so
+an AO radius control added earlier was treating a symptom.
+
+The reason is structural: AO samples the distance ESTIMATE along the normal, and on a deep IFS
+that estimate is a weak, non-smooth bound at every offset, so each probe lands on structure and
+the occlusion varies across a face that is genuinely flat.
+
+Each sample is now normalised by its own offset and clamped to at most 1, so one bad estimate
+cannot dominate, and the sum is divided by the total weight. Panel ripple 16.5 to 13.9.
+**An improvement, not a cure** — AO off gives 10.1. On such flames, turn AO down or off.
+
+### Smooth fan-shaped arcs — real fins, smeared
+
+Thin fins thrown off by a flip map, averaged away by **Normal smoothing**. At 16 the probe reaches
+about 0.15 world units, comparable to the structure, so the normal averages across many fins and
+they collapse into arcs. At 1 they resolve into the fins they always were. Normal smoothing is
+capped at 4 for this reason.
+
+### Concentric contour rings — the trap channel
+
+Distinct from the arcs above, and this one IS colour. The trap component driving colour defaulted
+to `trap.w`, the squared orbit radius — a radial quantity, so its level sets on a flat panel are
+rings, and a cosine palette turns them into contour bands. **Trap channel** (Colour) now offers
+the radius, any single axis, or the minimum of X/Y/Z, which band along the structure instead.
+Trap scale above about 1 wraps the palette more than once across one face.
+
+### Specks in empty space — a precision guard, since removed
+
+A guard that froze the backward walk when the best and second-best candidate were within a
+tolerance. Image boxes tie EXACTLY on their shared boundary planes, so it froze at the first step
+and returned an unrefined negative estimate that reads as a hit — false surface along those
+planes. Isolated specks 648 to 1006. Removed in 0.36.0.
+
+### Filled sheets are not a fault
+
+Four maps at scale exactly 0.5 translated to the four corners tile the square, so the attractor
+genuinely contains **filled sheets**. They are real geometry. Dropping the corner scale to 0.47
+makes them vanish because it changes the artwork, not because it fixes anything.
+
+Exact tiling does have a real cost for the estimator: the image boxes leave no gap, so box
+containment can never prove a point outside, and the surface resolves only to about
+`hull / 2^iters`. At 10 iterations that is roughly one pixel at a close camera.
+
+### The measurement trap, three times over
+
+A ripple or speckle metric counts high-frequency variation, and **resolving real detail raises it
+exactly as noise does**. On the fin region the score went UP from 8.4 to 34.0 when the smearing
+came off and the picture improved. The trap-channel change moved it 7.27 to 6.93 while the image
+changed completely.
+
+Two shipped changes had to be reverted because a number said they were safe:
+
+- **Precision guard** — a numeric model showed worst-case error dropping 138x to 2.4x. True, and
+  irrelevant; it added 55% more specks.
+- **Normal smoothing at high values** — offered against a grain metric, and it smears real
+  geometry.
+
+The **secant hit refinement** from the same period was checked the same way and kept: it slightly
+REDUCES specks, 751 to 661.
+
+### Hit refinement
+
+The hit test fires as soon as the estimate drops below the epsilon, so the reported distance is
+wherever the discrete steps landed rather than where the surface is. With a generous epsilon that
+quantisation shows as banding. The previous sample and the current one bracket the crossing, so
+the marcher interpolates to where the estimate would reach zero, at no extra `map()` call. It
+changes the default scene by a mean of 23.3 levels at a large epsilon — but only when steps are
+far apart; at a step scale of 0.145 it makes no measurable difference.
+
+### What was ruled out
+
+The estimator and the marcher were both suspected early and both cleared.
+
+- **The flame estimator is sound.** Against a 400,000-point ground-truth sample of the Jerusalem
+  cube, DE/true distance has a median of **0.994** — tight, not conservative — and exceeds 1.0 in
+  0.01% of samples, which is consistent with finite-sample error in the ground truth rather than
+  with a real overshoot. Iteration count made no difference to this.
+- **Step starvation is minor.** Instrumenting the marcher to separate rays that HIT, rays that
+  legitimately escaped to the background, and rays that ran out of budget mid-scene: starvation
+  is 1.8% on Folded frames, 3.5% on Menger sponge, and 0% on the flame scenes.
+- **All three gates still pass** on every operator and stack.
+
+So there was no estimator or marcher fault to find. The real gaps were the shading terms above
+and, separately, the complete absence of anti-aliasing.
 
 ## Running
 
