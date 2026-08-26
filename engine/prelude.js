@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.36.0-drop-precision-guard';
+export const BUILD = '0.38.0-ao-normalised';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -115,6 +115,7 @@ uniform float uCityHeight;
 uniform float uCityVar;
 uniform float uCityDetail;
 uniform float uTrapScale;
+uniform float uTrapChan;    // which orbit-trap component drives colour
 uniform float uTrapShift;
 uniform float uGlow;
 uniform float uExposure;
