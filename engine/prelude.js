@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.41.0-revert-normal-changes';
+export const BUILD = '0.42.0-selection-blend';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -115,6 +115,7 @@ uniform float uCityHeight;
 uniform float uCityVar;
 uniform float uCityDetail;
 uniform float uTrapScale;
+uniform float uSelBlend;    // 0 = image box, 1 = nearest image; the blend selection rule
 uniform float uTrapChan;    // which orbit-trap component drives colour
 uniform float uTrapShift;
 uniform float uGlow;
