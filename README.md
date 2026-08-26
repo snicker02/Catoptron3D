@@ -138,6 +138,29 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+### Blocky static while navigating — the viewport, not the render
+
+A video of the live viewport shows flat panels covered in hard-edged, axis-aligned blocks at
+several scales, with black holes, flickering as the camera moves. That is not noise and not
+shading: it is the IFS **cell structure landing below one pixel**, so neighbouring pixels sample
+different cells and classify them differently.
+
+Measured on one such flame, pixel-to-pixel variation: **8.2 at one ray per pixel, 4.2 at 2x2,
+3.0 at 4x4.** It is sampling, and supersampling fixes it.
+
+The problem was that supersampling only ever applied to **Save** and **Render** — the viewport
+deliberately draws one ray per pixel, below full resolution, and drops further while dragging.
+That is correct for interactivity and badly misleading for judging an image: the thing on screen
+looks broken while the saved file is clean, and there was no way to see a good image without
+explicitly pressing Render.
+
+**Refine when still** (Quality, on by default) redraws the settled frame at the Export samples
+count once the view has been still for a moment. Any interaction drops straight back to the live
+path. Auto-spin disables it, since the frame is never still.
+
+If a viewport looks like static, that is the first thing to check — and the second is to press
+**R** and compare.
+
 ### Mottled flat faces — ambient occlusion
 
 Switching shading terms off one at a time on a flat panel: **AO 16.5 to 10.1**, reflections 16.5
