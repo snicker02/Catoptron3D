@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.39.0-idle-refine';
+export const BUILD = '0.40.0-normal-floors';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -36,6 +36,7 @@ uniform float uMaxDist;
 uniform float uStepScale;   // safety multiplier — lower it when a 'bound' op misbehaves
 uniform float uEps;
 uniform float uNormEps;
+uniform float uNormMode;    // 0 = estimator gradient, 1 = screen-space derivative
                             // is no longer decidable in float32     // normal-probe offset, as a multiple of the hit epsilon
 
 // IFS recursion (the fold stack is the map; this is the per-pass contraction)
@@ -121,4 +122,3 @@ uniform float uGlow;
 uniform float uExposure;
 uniform float uSat;
 `;
-
