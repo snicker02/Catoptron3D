@@ -138,6 +138,27 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+### Why `nearest image` looks cleaner, and what it costs
+
+Switching Map selection from `image box` to `nearest image` makes the crust disappear. It is worth
+being precise about what that does, because the cleaner picture is the less accurate one.
+
+Measured against a 400,000-point chaos-game ground truth on a five-xform flame, classifying cells
+on a 40^3 grid:
+
+| rule | agreement | attractor cells missed | phantom cells | rendered coverage |
+|---|---|---|---|---|
+| image box | **96.1%** | **5** of 1388 | **309** | 57.2% |
+| nearest image | 93.1% | 84 | 465 | **98.3%** |
+
+`nearest image` is worse on BOTH counts — it misses seventeen times as many real cells and invents
+fifty per cent more phantom ones — and it paints 98% of the frame solid against 57%. The extra
+false surface is smooth, so it does not remove the fine structure, it **covers** it. The crust is
+still there underneath; a blanket has been thrown over it.
+
+That makes it a legitimate choice for the look, and it should be chosen with open eyes: it is a
+smoothed and inflated version of the attractor, not a better picture of it. The panel says so.
+
 ### The crust on fractal faces is the geometry
 
 Repeatedly reported, and chased through colour, precision, step scale, AO, the trap channel and
