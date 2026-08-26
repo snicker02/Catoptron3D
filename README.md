@@ -138,6 +138,31 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+### Blending the two selection rules
+
+The two rules are both LENGTHS on the same scale — the distance from p to a map's image box, and
+the size of the preimage q — so they interpolate directly:
+
+    d = mix(sdBox(p, box_i), length(q_i), blend)
+
+At 0 this is exactly `image box`. At 1 it orders identically to `nearest image`, since argmin |q|
+and argmin |q|^2 agree. **Blend (box <-> image)** is the fourth Map selection mode, with a slider.
+
+The interesting part is that the middle is not merely a compromise. Measured against a
+400,000-point chaos-game ground truth on a five-xform flame:
+
+| blend | agreement | attractor cells missed | phantom |
+|---|---|---|---|
+| 0.00 (image box) | **96.1%** | 5 | **309** |
+| 0.15 | 94.9% | 1 | 406 |
+| 0.35 | 94.7% | 1 | 420 |
+| 0.70 | 94.2% | **0** | 462 |
+| 1.00 (nearest image) | 93.1% | 84 | 465 |
+
+A little blend **recalls more real structure than pure image box** — misses fall from 5 to 0 — at
+the cost of more phantom surface. It is past about 0.8 that it stops filling gaps and starts
+burying detail, which is where the smooth-but-wrong look comes from. Default 0.35.
+
 ### Why `nearest image` looks cleaner, and what it costs
 
 Switching Map selection from `image box` to `nearest image` makes the crust disappear. It is worth
