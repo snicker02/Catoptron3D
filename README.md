@@ -138,6 +138,37 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+### The crust on fractal faces is the geometry
+
+Repeatedly reported, and chased through colour, precision, step scale, AO, the trap channel and
+the normal calculation. The isolation that settled it, on the exact preset:
+
+- **Depth** is smooth where the surface is smooth and textured only where the crust is.
+- **The estimator is well conditioned at the hit** — sampling it across the surface gives
+  transverse slopes of 0.3 to 0.8, which is what a distance function should give. It is not
+  returning noise.
+- **Supersampling resolves the crust into coherent structure** rather than erasing it: 4x4 takes
+  pixel-to-pixel variation from 24.1 to 17.0 and the texture becomes legible detail.
+
+So the crust is real fractal detail at or below one pixel. The normals in that region genuinely
+are near-random, because the surface genuinely is rough at that scale — an earlier note here
+called those normals the fault, and a screen-derivative normal was added to fix it, which changed
+the picture almost not at all. That is recorded because it was a wrong conclusion drawn from a
+correct measurement.
+
+Two real defects were found on the way and are fixed:
+
+- **The normal probe could be finer than the estimator's own discretisation.** It now has two
+  floors: one pixel footprint, and the estimator's cell size `1/s` taken from the marcher's last
+  evaluation at no extra cost. Probing below either measures noise rather than a gradient.
+- **Normal source** (Quality) can take the gradient of the hit position across the pixel quad
+  instead of sampling the estimator. Exact where depth is smooth, free, and it falls back at
+  silhouettes. It helps on smooth surfaces and does nothing for genuinely rough ones.
+
+**What actually changes the picture** on a flame like this: more samples (Export samples, and
+Refine when still), fewer iterations so the geometry is coarser than a pixel, or a camera further
+back. Not a renderer setting — the detail is really there.
+
 ### Blocky static while navigating — the viewport, not the render
 
 A video of the live viewport shows flat panels covered in hard-edged, axis-aligned blocks at
