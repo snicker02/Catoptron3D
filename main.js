@@ -50,7 +50,7 @@ const state = {
   aa: 1, aaExport: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
-  lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 1.0, aoRadius: 0.5, shadow: 0.0,
+  lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
   spec: 0.55, rim: 0.9, fog: 0.35, reflect: 0.55, fresnel: 0.6, metal: 0.0, bounces: 0,
   transp: 0.0, ior: 1.48, absorb: 0.6, disp: 0.0,
   // colour
@@ -403,6 +403,7 @@ function renderScene(w, h){
   }
   u1(L, 'uHaze', state.haze);
   u1(L, 'uTrapScale', state.trapScale);
+  u1(L, 'uTrapChan', state.trapChan);
   u1(L, 'uTrapShift', state.trapShift);
   u1(L, 'uGlow', state.glow);
   u1(L, 'uExposure', state.exposure);
@@ -1533,6 +1534,27 @@ function buildGlobals(){
     if(title === 'Colour'){
       g.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                         v => { state.palette = v; }, false));
+      g.append(mkSelect('Trap channel',
+                        ['radius \u2014 concentric rings', 'X axis', 'Y axis', 'Z axis',
+                         'min of X,Y,Z \u2014 cell edges'],
+                        Math.round(state.trapChan),
+                        v => { state.trapChan = v; }, false));
+      const tn = document.createElement('p');
+      tn.className = 'note';
+      tn.textContent = 'The radius channel bands in concentric rings, which on a flat panel look '
+        + 'like contour lines and are often mistaken for a rendering fault. Axis or cell-edge '
+        + 'channels band along the structure instead. Trap scale sets how many bands: above '
+        + 'about 1 the palette wraps more than once across one face.';
+      g.append(tn);
+    }
+    if(title === 'Lighting'){
+      const an2 = document.createElement('p');
+      an2.className = 'note';
+      an2.textContent = 'If flat faces look mottled, turn AO down. It samples the distance '
+        + 'estimate along the normal, and on a deep IFS that estimate is a weak bound at every '
+        + 'offset, so the occlusion varies across a face that is genuinely flat. Measured on one '
+        + 'such flame the mottling was almost entirely AO; no radius removes it.';
+      g.append(an2);
     }
     if(title === 'Quality'){
       const nn = document.createElement('p');
