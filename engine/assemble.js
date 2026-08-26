@@ -407,7 +407,6 @@ ${useShell ? `  // Shell: the signed distance to the SURFACE of a solid rather t
 // ── the distance estimator ──────────────────────────────────────────────────────────────
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
 // primitive's distance in folded space divided back out by it.
-float gScale;                         // set by mapT; read by calcNormal
 float mapT(vec3 p, out vec4 trap, out float safe){
   vec3 p0 = p;                        // the original sample point, for escape-time feedback
   gFlamePrev = -1;                    // no map has been undone yet, so nothing is forbidden
@@ -438,29 +437,23 @@ ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to inf
   // and the safe step are now separate outputs: hit-test against the true distance, advance by
   // the clamped one.
   safe = min(d, seam);
-  gScale = s;                         // accumulated expansion: DE resolution is ~1/s in world units
   return ${cfg.seamSurf ? 'safe' : 'd'};
 }
 
 float map(vec3 p){ vec4 t; float sf; return mapT(p, t, sf); }
 
 vec3 calcNormal(vec3 p, float t){
-  // The probe must not be finer than the estimator's own discretisation, or it measures noise.
+  // The probe offset is the hit epsilon, scaled by Normal smoothing. Deliberately plain.
   //
-  // A backward-IFS estimate is piecewise, with pieces about 1/s across once the accumulated
-  // expansion s is taken into account. Probing at the HIT epsilon puts the four samples in
-  // different pieces and the normal comes back random per pixel — a crust of confetti on
-  // surfaces whose DEPTH is perfectly smooth. It is the most convincing "rendering artifact"
-  // this tool produces and it lives entirely in the normal.
+  // Two "improvements" were tried here and both made every scene worse, so they are recorded
+  // rather than repeated. Flooring at ONE PIXEL FOOTPRINT sounded right — detail below a pixel
+  // cannot be displayed — but it put a visible moiré ripple across surfaces that were clean
+  // before. Flooring at the estimator's cell size 1/s was worse still: 1/s is a world-space
+  // length, so on any scene with a small accumulated scale it forces a probe of a large fraction
+  // of a unit and destroys the shading everywhere.
   //
-  // Two floors, whichever is larger. One PIXEL FOOTPRINT, because detail finer than a pixel
-  // cannot be displayed and measuring there only aliases. And the ESTIMATOR'S OWN cell size,
-  // 1/s, taken from the marcher's last evaluation at no extra cost, because probing inside a
-  // piece is the only way to get a meaningful gradient out of a piecewise function.
-  float sc = max(gScale, 1e-6);
-  float cell = 1.5 / sc;
-  float px = t / max(uRes.y * uFov, 1.0);
-  float e = max(max(uEps * t, px), max(cell, 1e-5)) * max(uNormEps, 0.25);
+  // Neither had measured a benefit on the case that motivated them before being shipped.
+  float e = max(uEps * t, 1e-5) * max(uNormEps, 0.25);
   vec2 k = vec2(1.0, -1.0);
   return normalize(
     vec3( k.x, k.y, k.y) * map(p + vec3( k.x, k.y, k.y) * e) +
@@ -629,30 +622,10 @@ vec3 tracePath(vec3 ro, vec3 rd, float ior, out float glowTot){
     float t = march(ro, rd, side, ga);
     glowTot += ga * (b == 0 ? 1.0 : 0.55);
 
-    // SCREEN-SPACE NORMAL, taken BEFORE the background early-out so the whole quad still
-    // reaches it — derivatives are only defined under uniform control flow, and a lane that has
-    // already broken out contributes nothing.
-    //
-    // Probing the estimator for a normal can return noise on a surface whose DEPTH is perfectly
-    // smooth, because the estimate is piecewise: that is the crust of confetti on flat faces.
-    // The gradient of the hit POSITION across the pixel quad has no such problem — it is exact
-    // wherever the depth is smooth, and costs nothing.
-    vec3 pq = ro + rd * max(t, 0.0);
-    vec3 dpx = dFdx(pq), dpy = dFdy(pq);
-
     if(t < 0.0){ accum += atten * background(rd); break; }
 
     vec3 p = ro + rd * t;
     vec3 gn = calcNormal(p, t);
-    if(uNormMode > 0.5 && b == 0){
-      // only on the primary hit: after a bounce, neighbouring pixels are no longer following
-      // comparable rays and the quad derivative means nothing
-      float span = max(length(dpx), length(dpy));
-      if(span > 1e-9 && span < 0.05 * max(t, 1e-3)){
-        vec3 sn = normalize(cross(dpx, dpy));
-        gn = dot(sn, gn) < 0.0 ? -sn : sn;   // keep the estimator's orientation
-      }
-    }
     vec3 n  = gn * side;               // always faces the incoming ray
     vec4 trap;
     float safeIgn;
