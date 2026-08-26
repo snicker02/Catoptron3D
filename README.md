@@ -161,34 +161,28 @@ smoothed and inflated version of the attractor, not a better picture of it. The 
 
 ### The crust on fractal faces is the geometry
 
-Repeatedly reported, and chased through colour, precision, step scale, AO, the trap channel and
-the normal calculation. The isolation that settled it, on the exact preset:
+On the preset that prompted this, the isolation was: depth is smooth where the surface is smooth
+and textured only where the crust is; the estimator sampled across the surface at the hit gives
+transverse slopes of 0.3 to 0.8, which is what a distance function should give; and supersampling
+resolves the crust into coherent structure rather than erasing it, 24.1 to 17.0 pixel-to-pixel
+at 4x4. So on that preset the crust is real detail at or below one pixel.
 
-- **Depth** is smooth where the surface is smooth and textured only where the crust is.
-- **The estimator is well conditioned at the hit** — sampling it across the surface gives
-  transverse slopes of 0.3 to 0.8, which is what a distance function should give. It is not
-  returning noise.
-- **Supersampling resolves the crust into coherent structure** rather than erasing it: 4x4 takes
-  pixel-to-pixel variation from 24.1 to 17.0 and the texture becomes legible detail.
+**Two attempted fixes were reverted, and the reason matters more than the fixes.**
 
-So the crust is real fractal detail at or below one pixel. The normals in that region genuinely
-are near-random, because the surface genuinely is rough at that scale — an earlier note here
-called those normals the fault, and a screen-derivative normal was added to fix it, which changed
-the picture almost not at all. That is recorded because it was a wrong conclusion drawn from a
-correct measurement.
+Reasoning from the confetti-normal buffer, the probe was floored at one pixel footprint and then
+also at the estimator's cell size `1/s`. Both were plausible. Both were shipped after measuring
+**no benefit** on the very case that motivated them — the roughness metric went 20.66 to 21.46,
+slightly WORSE — and both then degraded every other scene: a visible moiré ripple across surfaces
+that had been clean, mean image difference 13.7 and 14.0 against the previous build. The cell
+floor was worse still, because `1/s` is a world-space length and a scene with a small accumulated
+scale gets a probe of a large fraction of a unit.
 
-Two real defects were found on the way and are fixed:
+A screen-space derivative normal was added at the same time on the same reasoning, also measured
+as no change, also shipped, also removed.
 
-- **The normal probe could be finer than the estimator's own discretisation.** It now has two
-  floors: one pixel footprint, and the estimator's cell size `1/s` taken from the marcher's last
-  evaluation at no extra cost. Probing below either measures noise rather than a gradient.
-- **Normal source** (Quality) can take the gradient of the hit position across the pixel quad
-  instead of sampling the estimator. Exact where depth is smooth, free, and it falls back at
-  silhouettes. It helps on smooth surfaces and does nothing for genuinely rough ones.
-
-**What actually changes the picture** on a flame like this: more samples (Export samples, and
-Refine when still), fewer iterations so the geometry is coarser than a pixel, or a camera further
-back. Not a renderer setting — the detail is really there.
+`calcNormal` is now byte-for-byte what it was before, and the render is pixel-identical to the
+pre-0.40.0 reference. The rule this cost three regressions to learn: **a change that measures no
+improvement on its own motivating case does not ship**, whatever the reasoning behind it says.
 
 ### Blocky static while navigating — the viewport, not the render
 
