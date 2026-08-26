@@ -96,7 +96,7 @@ export function normalizeCfg(cfg){
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
     flameXaos: cfg.flameXaos || (resolveFlame(cfg.flame).xaos || null),
-    flameSelect: Math.max(0, Math.min(2, cfg.flameSelect !== undefined
+    flameSelect: Math.max(0, Math.min(3, cfg.flameSelect !== undefined
                    ? cfg.flameSelect | 0
                    : ((cfg.flame && cfg.flame.select) | 0))),
     disp:     !!cfg.disp,
@@ -312,6 +312,12 @@ ${cfg.flameSelect === 2 ? `      // IMAGE BOX: for an affine IFS the exact rule 
       // than a heuristic. On a Jerusalem cube the 20 image boxes are perfectly disjoint and this
       // misses ZERO attractor cells, where nearest-image missed most of them.
       float d = sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]) * bias;` :
+  cfg.flameSelect === 3 ? `      // BLEND. Both rules are LENGTHS on the same scale — distance from p to this map's image
+      // box, and the size of the preimage q — so they interpolate directly. At 0 this is exactly
+      // image box; at 1 it orders identically to nearest image, since argmin |q| and argmin |q|^2
+      // agree. In between it trades accuracy for smoothness continuously.
+      float d = mix(sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]),
+                    length(q), clamp(uSelBlend, 0.0, 1.0)) * bias;` :
 `      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
       float d = dot(dv, dv) * bias;`}
 ${useXaos ? `      // this map may only be the predecessor if xaos allows it to lead to the last one
@@ -321,7 +327,7 @@ ${useXaos ? `      // this map may only be the predecessor if xaos allows it to 
     }`).join('');
 
   // Complex arithmetic, emitted once and only when a flame is present.
-  const BOXSEL = cfg.flameSelect === 2 ? `
+  const BOXSEL = (cfg.flameSelect === 2 || cfg.flameSelect === 3) ? `
 float sdBoxLoHi(vec3 p, vec3 lo, vec3 hi){
   vec3 c = (lo + hi) * 0.5, h = (hi - lo) * 0.5;
   vec3 q = abs(p - c) - h;
