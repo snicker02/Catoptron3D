@@ -225,9 +225,20 @@ That is correct for interactivity and badly misleading for judging an image: the
 looks broken while the saved file is clean, and there was no way to see a good image without
 explicitly pressing Render.
 
-**Refine when still** (Quality, on by default) redraws the settled frame at the Export samples
-count once the view has been still for a moment. Any interaction drops straight back to the live
-path. Auto-spin disables it, since the frame is never still.
+**Refine when still** (Quality, **off** by default) redraws the settled frame at the Export
+samples count once the view has been still for a moment. Any interaction drops straight back to
+the live path; auto-spin disables it.
+
+It defaults off because it costs interactivity. A supersampled pass is several times a normal
+frame AND needs its own compiled program, since the sample count is part of the shader signature
+— so every parameter change means a fresh program for both the live and the refined pass. Pressing
+**R** gives the same picture on demand without the cost.
+
+The first version also **blocked the main thread** waiting for that program to link, which is
+right for an explicit export and completely wrong for something automatic: the interface stalled
+for the whole link time every time the view settled, after every change. The idle path is now
+non-blocking — it asks for the program, gives up for that frame if it is not linked, and asks
+again next idle frame.
 
 If a viewport looks like static, that is the first thing to check — and the second is to press
 **R** and compare.
