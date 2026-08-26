@@ -47,7 +47,7 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0,
+  aa: 1, aaExport: 2, idleRefine: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -275,9 +275,10 @@ function withSamples(n, draw){
   if(renderAA !== 1){
     const cfg = currentCfg();
     let r = cache.request(cfg);
-    // KHR_parallel_shader_compile links off-thread, so poll the cache until it reports ready.
-    // This blocks, which is right for an export: a save that silently used the wrong program is
-    // worse than one that takes an extra moment.
+    // Blocking poll. This is ONLY for an explicit export or quick render, where the person asked
+    // for an image and a short wait is expected — a save that silently used the wrong program is
+    // worse than one that takes a moment. The automatic idle refinement must never come through
+    // here: it would stall the interface for the whole link time every time the view settled.
     const t0 = performance.now();
     while(!r.ready && !r.error && performance.now() - t0 < 8000) r = cache.request(cfg);
     if(r.ready) cur = r.entry;
@@ -286,6 +287,7 @@ function withSamples(n, draw){
   try { draw(renderAA, ok); }
   finally { renderAA = prevAA; cur = prevCur; curSig = prevSig; }
 }
+
 
 function renderScene(w, h){
   if(!cur || !cur.locs) return;
@@ -438,7 +440,7 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0,
+           aa: 1, aaExport: 2, idleRefine: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1012,13 +1014,31 @@ let refined = false;
 
 function tryRefine(){
   if(refined || previewHold || paused) return;
-  const n = Math.max(1, Math.round(state.aaExport));
+  const n = Math.max(1, Math.min(4, Math.round(state.aaExport)));
   if(n <= 1 || !cur) return;
-  refined = true;                       // set first: a failed build must not retry every frame
-  withSamples(n, (used, ok) => {
-    if(ok && used > 1) renderScene(cv.width, cv.height);
-  });
+
+  // NON-BLOCKING. Ask for the supersampled program and give up for this frame if it is not
+  // linked yet; the next idle frame asks again. Waiting here instead was the whole cost of
+  // this feature — a stall for the full link time on every settle, after every parameter
+  // change, because the sample count is part of the shader signature and so each change needs
+  // a fresh program for BOTH the live and the refined pass.
+  const prevAA = renderAA;
+  renderAA = n;
+  const cfg = currentCfg();
+  renderAA = prevAA;
+
+  const r = cache.request(cfg);
+  if(r.error){ refined = true; return; }      // never retry a program that will not build
+  if(!r.ready) return;                        // try again next idle frame
+
+  refined = true;
+  const prevCur = cur, prevSig = curSig;
+  renderAA = n;
+  cur = r.entry;
+  try { renderScene(cv.width, cv.height); }
+  finally { renderAA = prevAA; cur = prevCur; curSig = prevSig; }
 }
+
 
 // Anything that changes the image drops the hold, so the preview can never go quietly stale.
 function releasePreview(){
@@ -1629,8 +1649,11 @@ function buildGlobals(){
       rn.textContent = 'The viewport draws one ray per pixel below full resolution, so a fractal '
         + 'with detail finer than a pixel turns into blocky static while you navigate. That is '
         + 'the viewport, not the render \u2014 measured on one flame, pixel-to-pixel variation '
-        + 'falls 8.2 to 4.2 at 2\u00d72 and 3.0 at 4\u00d74. With this on, the frame is redrawn '
-        + 'at the Export samples count once the view has been still for a moment.';
+        + 'falls 8.2 to 4.2 at 2\u00d72 and 3.0 at 4\u00d74. With this ON, the frame is redrawn '
+        + 'at the Export samples count once the view has been still for a moment \u2014 which '
+        + 'costs a visible pause on every settle, since a supersampled pass is several times a '
+        + 'normal frame and needs its own compiled program. OFF by default for that reason; '
+        + 'pressing R gives the same picture on demand.';
       g.append(rn);
       g.append(mkSelect('Export samples',
                         ['1\u00d71 \u2014 off', '2\u00d72', '3\u00d73', '4\u00d74'],
