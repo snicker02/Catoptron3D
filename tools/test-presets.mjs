@@ -596,11 +596,19 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     fl.select = sel;
     const g = assemble({ stack: [{ type: 26, p: [1] }], prim: 7, iters: 4, steps: 96,
                          ao: false, shadow: false, glow: false, bounces: 0, flame: fl });
-    return g.includes('sdBoxLoHi(p, uFlameBLo') ? 'box'
+    return g.includes('mix(sdBoxLoHi') ? 'blend'
+         : g.includes('sdBoxLoHi(p, uFlameBLo') ? 'box'
          : g.includes('uFlameFp[0]') ? 'fixed' : 'image';
   });
   ok('each selection mode emits its own rule',
      emitted.join(',') === 'image,fixed,box', emitted.join(','));
+
+  // the blend must be a true interpolation: identical to image box at 0 and to nearest image at 1
+  fl.select = 3;
+  const bsrc = assemble({ stack: [{ type: 26, p: [1] }], prim: 7, iters: 4, steps: 96,
+                          ao: false, shadow: false, glow: false, bounces: 0, flame: fl });
+  ok('the blend mode emits the mixed metric', bsrc.includes('mix(sdBoxLoHi'));
+  ok('and still emits the box helper it needs', bsrc.includes('float sdBoxLoHi'));
 }
 
 // 11c. CLIPBOARD. A preset travels as JSON, as a bare payload, or inside a share URL, and a
@@ -684,6 +692,13 @@ console.log('preset format v' + PRESET_VERSION + '\n');
       !NO_WIDGET.has(k) && !groups.includes("'" + k + "'") &&
       !builders.includes('state.' + k + ' ='));
     ok('every tunable state key has a control', missing.length === 0, missing.join(', '));
+
+    // ...and the converse: every state.<key> the renderer UPLOADS must EXIST in state. A missing
+    // one is uploaded as undefined, which silently becomes 0 or NaN in the shader. Two shipped
+    // that way (trapChan, selBlend) because the lint above only inspects keys that are present.
+    const up = [...js.matchAll(/u[1234]\(L, '[^']+', state\.([A-Za-z0-9_]+)/g)].map(m => m[1]);
+    const ghosts = [...new Set(up)].filter(k => !(k in st));
+    ok('every uploaded state key exists in state', ghosts.length === 0, ghosts.join(', '));
 
     // EXPORT MUST BUILD ITS OWN PROGRAM. Setting the sample count alone did nothing: `cur` is
     // only swapped by syncProgram, which runs in the frame loop, so export and quick render kept
