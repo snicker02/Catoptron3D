@@ -47,7 +47,7 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0, normMode: 1,
+  aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -306,7 +306,6 @@ function renderScene(w, h){
   u1(L, 'uStepScale', state.stepScale);
   u1(L, 'uEps', state.eps);
   u1(L, 'uNormEps', state.normEps);
-  u1(L, 'uNormMode', state.normMode);
 
   u3(L, 'uIfsCenter', state.ifsCx, state.ifsCy, state.ifsCz);
   u1(L, 'uIfsScale', state.ifsScale);
@@ -437,7 +436,7 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0, normMode: 1,
+           aa: 1, aaExport: 2, idleRefine: 1, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1589,16 +1588,6 @@ function buildGlobals(){
       g.append(an2);
     }
     if(title === 'Quality'){
-      g.append(mkSelect('Normal source', ['estimator gradient', 'screen derivative'],
-                        state.normMode ? 1 : 0, v => { state.normMode = v; }, false));
-      const nm = document.createElement('p');
-      nm.className = 'note';
-      nm.textContent = 'The estimator is piecewise, so probing it for a normal can return noise '
-        + 'on a surface whose DEPTH is perfectly smooth \u2014 that is the crust of confetti on '
-        + 'flat faces. The screen derivative takes the gradient of the hit position across the '
-        + 'pixel quad instead: exact where depth is smooth, free, and it falls back to the '
-        + 'estimator at silhouettes where the quad straddles two surfaces.';
-      g.append(nm);
       const nn = document.createElement('p');
       nn.className = 'note';
       nn.textContent = 'Normal smoothing widens the probe used for shading normals. Past about '
