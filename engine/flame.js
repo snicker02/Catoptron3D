@@ -502,7 +502,7 @@ export function resolveFlame(flame){
 // signature; their amounts and parameters are uniforms and do not.
 export function flameKey(flame){
   const r = resolveFlame(flame);
-  const sel = Math.max(0, Math.min(2, (flame && flame.select) | 0));
+  const sel = Math.max(0, Math.min(3, (flame && flame.select) | 0));
   const ax = (r.xaos || []).map(row => row.join('')).join('');
   return r.length + ':' + sel + ':' + r.map(m => m.vari).join('') + ':' + ax;
 }
