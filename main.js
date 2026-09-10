@@ -1653,6 +1653,26 @@ function buildGlobals(){
         + 'it starts burying detail.';
       fg.append(bn);
     }
+    // Say plainly whether the exact rule applies to THIS flame. It is exact only while the image
+    // boxes are disjoint; a rotated map's AABB is far bigger than its image, and once the boxes
+    // overlap the choice inside the overlap is arbitrary — phantom surface, and terracing on it.
+    const ov = resolveFlame(state.flame).boxOverlap;
+    if(ov && ov.pairs){
+      const ex = document.createElement('p');
+      ex.className = 'note';
+      if(ov.exact){
+        ex.textContent = 'Image boxes are disjoint (' + ov.pairs + ' pairs checked), so '
+          + '\u201cimage box\u201d is the exact rule for this flame.';
+      } else {
+        ex.style.color = 'var(--warn1)';
+        ex.textContent = ov.overlapping + ' of ' + ov.pairs + ' image-box pairs OVERLAP \u2014 '
+          + 'usually because a transform rotates, which makes its axis-aligned box much larger '
+          + 'than its actual image. \u201cImage box\u201d is NOT exact for this flame: inside an '
+          + 'overlap the choice is arbitrary, which paints phantom surface and terraces across '
+          + 'it. Blend or nearest image will look different, not more correct.';
+      }
+      fg.append(ex);
+    }
     const sm = document.createElement('p');
     sm.className = 'note';
     sm.textContent = 'IMAGE BOX is the accurate rule. NEAREST IMAGE often looks cleaner, and it '

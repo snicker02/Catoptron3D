@@ -510,6 +510,28 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        JSON.stringify(rt2.flame.maps[0].chaos) === JSON.stringify([1, 1, 1, 0]));
   }
 
+  // EXACTNESS REPORTING. "Image box" is exact only while the image boxes are disjoint. A rotated
+  // map's AABB is much larger than its image, so enough rotation makes every box overlap and the
+  // rule silently becomes a heuristic. The flame layer must be able to say which case it is in.
+  {
+    const axis = resolveFlame(parseFlameTop(readFileSync(
+      new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8')));
+    ok('an axis-aligned flame reports the exact rule as applicable',
+       axis.boxOverlap && axis.boxOverlap.exact && axis.boxOverlap.overlapping === 0,
+       axis.boxOverlap ? axis.boxOverlap.overlapping + '/' + axis.boxOverlap.pairs : 'missing');
+
+    // rotate one transform hard enough and the boxes must be reported as overlapping
+    const rot = parseFlameTop(readFileSync(
+      new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8'));
+    rot.maps[0].rot = [131, -91, 0];
+    const rr = resolveFlame(rot);
+    ok('a rotated transform is reported as NOT exact',
+       rr.boxOverlap && !rr.boxOverlap.exact,
+       rr.boxOverlap ? rr.boxOverlap.overlapping + '/' + rr.boxOverlap.pairs : 'missing');
+    ok('and the pair count is the full pairwise count',
+       rr.boxOverlap.pairs === rr.length * (rr.length - 1) / 2);
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

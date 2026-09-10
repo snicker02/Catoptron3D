@@ -502,6 +502,25 @@ export function resolveFlame(flame){
     const hi = [0, 1, 2].map(r => Math.max(...sh.hi.map(v => v[r])));
     out.hull = { lo, hi };
     out.xaos = A;
+
+    // Does the exact rule actually apply? "Image box" is exact only while the image boxes are
+    // DISJOINT. The image of a rotated map is not axis-aligned, so its AABB is much larger than
+    // the image itself, and with enough rotation every box overlaps every other. The rule then
+    // has nothing to discriminate on and the choice becomes arbitrary inside the overlap — which
+    // is what paints phantom surface and terraces on it.
+    //
+    // The panel calls the rule "exact for affine". For a flame like that it is not, and saying so
+    // is worth more than a rule that quietly degrades.
+    let pairs = 0, overlapping = 0;
+    for(let i = 0; i < out.length; i++){
+      for(let j = i + 1; j < out.length; j++){
+        pairs++;
+        const hit = [0, 1, 2].every(a =>
+          Math.min(out[i].bhi[a], out[j].bhi[a]) - Math.max(out[i].blo[a], out[j].blo[a]) > 1e-6);
+        if(hit) overlapping++;
+      }
+    }
+    out.boxOverlap = { pairs, overlapping, exact: overlapping === 0 };
   }
   return out;
 }
