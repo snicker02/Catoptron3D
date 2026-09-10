@@ -532,6 +532,38 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        rr.boxOverlap.pairs === rr.length * (rr.length - 1) / 2);
   }
 
+  // VOXEL MODE. A separate estimator path, so it must be a separate program, and the field
+  // itself must come out as a real signed distance function or every consumer of map() breaks.
+  {
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const { buildField } = await import(new URL('../engine/voxel.js', import.meta.url).href);
+    const base = { stack: [], prim: 0, iters: 4, steps: 96, ao: false, shadow: false,
+                   glow: false, bounces: 0 };
+    ok('voxel mode is a different program', signature(base) !== signature({ ...base, voxel: true }));
+    const vs = assemble({ ...base, voxel: true });
+    ok('voxel mode replaces the estimator',
+       vs.includes('float sdfAt(vec3 p)') && !vs.includes('float s = 1.0;'));
+    ok('and keeps map() for every consumer', vs.includes('float map(vec3 p){'));
+    ok('sampler3D carries a precision qualifier', vs.includes('highp sampler3D uSdf'));
+
+    // the field must behave like a distance function: negative inside, positive outside, and
+    // never changing faster than 1 unit per unit of travel
+    const maps = resolveFlame(parseFlameTop(readFileSync(
+      new URL('../examples/vicsek-cross.flame', import.meta.url), 'utf8')));
+    const f = buildField(maps, 48, 300000);
+    ok('the field has interior and exterior',
+       f.sdf.some(v => v < 0) && f.sdf.some(v => v > 0));
+    let worst = 0;
+    const G = f.G, at = (x, y, z) => f.sdf[(z*G + y)*G + x];
+    for(let z = 1; z < G - 1; z += 3)
+      for(let y = 1; y < G - 1; y += 3)
+        for(let x = 1; x < G - 1; x += 3)
+          worst = Math.max(worst, Math.abs(at(x+1,y,z) - at(x-1,y,z)) / (2 * f.voxel));
+    ok('the field is 1-Lipschitz (a real distance function)', worst <= 1.02, worst.toFixed(4));
+    ok('the R8 encoding round-trips the sign',
+       [...f.bytes].some(b => b < 128) && [...f.bytes].some(b => b > 128));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

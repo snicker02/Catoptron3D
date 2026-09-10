@@ -13,6 +13,7 @@ import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, parseAny,
          PRESET_VERSION } from './engine/preset.js';
 import { FACTORY } from './engine/factory.js';
+import { buildField } from './engine/voxel.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
          FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP, xaosIsTrivial } from './engine/flame.js';
@@ -48,7 +49,7 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2, idleRefine: 0, normEps: 1.0,
+  aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -199,6 +200,7 @@ function currentCfg(){
     // `image box` into `nearest fixed point`. The exact rule never reached the shader.
     flameSelect: (state.flame && state.flame.select) | 0,
     flameXaos: resolveFlame(state.flame).xaos || null,
+    voxel: !!(state.flameVoxel && state.flame && voxField),
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -400,6 +402,14 @@ function renderScene(w, h){
   u1(L, 'uEnvRot', state.envRot);
   u1(L, 'uTexAmt', state.texAmt);
   u1(L, 'uTexScale', state.texScale);
+  if(L['uSdf'] && voxTex){
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_3D, voxTex);
+    gl.uniform1i(L['uSdf'], 3);
+    u3(L, 'uSdfLo', voxField.lo[0], voxField.lo[1], voxField.lo[2]);
+    u3(L, 'uSdfHi', voxField.hi[0], voxField.hi[1], voxField.hi[2]);
+    u1(L, 'uSdfRange', voxField.range);
+  }
   if(L['uImg'] && imgTex){
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, imgTex);
@@ -441,7 +451,7 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2, idleRefine: 0, normEps: 1.0,
+           aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -706,6 +716,63 @@ function refreshFlameLabel(){
   e.style.color = w ? 'var(--warn1)' : '';
 }
 
+
+/* ── voxel field ────────────────────────────────────────────────────────────────────────────
+   The flame estimator has to guess which map's image a point came from; the chaos game does not
+   guess, because it IS the attractor's definition. Building the attractor and distance
+   transforming it turns the flame into an ordinary signed distance field, which the existing
+   marcher, normals, AO and reflections consume unchanged.
+
+   The cost is a rebuild whenever the flame changes, and a hard detail ceiling at one voxel. It is
+   a mode, not a replacement.                                                                   */
+let voxField = null, voxTex = null, voxKey = '';
+
+function voxSignature(){
+  const fm = resolveFlame(state.flame);
+  if(!fm.length) return '';
+  return state.voxelGrid + ':' + fm.map(m =>
+    m.M.map(v => v.toFixed(6)).join(',') + '|' + m.T.map(v => v.toFixed(6)).join(',')).join(';');
+}
+
+function disposeVox(){
+  if(voxTex){ gl.deleteTexture(voxTex); voxTex = null; }
+  voxField = null; voxKey = '';
+}
+
+function ensureVoxField(){
+  if(!state.flameVoxel || !state.flame){ if(voxTex) disposeVox(); return; }
+  const key = voxSignature();
+  if(!key){ disposeVox(); return; }
+  if(key === voxKey && voxTex) return;
+
+  const fm = resolveFlame(state.flame);
+  const G = Math.max(32, Math.min(256, Math.round(state.voxelGrid)));
+  const samples = Math.min(8e6, G * G * G * 1.6);
+  setStat('building voxel field \u2026 ' + G + '\u00b3');
+  let f;
+  try { f = buildField(fm, G, samples); }
+  catch(e){
+    console.warn('[catoptron3d] voxel build failed', e);
+    setStat('voxel field could not be built \u2014 staying on the estimator');
+    state.flameVoxel = 0;
+    disposeVox();
+    return;
+  }
+  if(voxTex) gl.deleteTexture(voxTex);
+  voxTex = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_3D, voxTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, G, G, G, 0, gl.RED, gl.UNSIGNED_BYTE, f.bytes);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+  voxField = f; voxKey = key;
+  setStat('voxel field ' + G + '\u00b3 \u00b7 ' + (100 * f.filled / f.total).toFixed(1)
+          + '% occupied \u00b7 voxel ' + f.voxel.toFixed(4));
+}
 
 /* ── xaos ──────────────────────────────────────────────────────────────────────────────────
    A grid of toggles: row i, column j is "may xform i be followed by xform j".
@@ -1683,6 +1750,23 @@ function buildGlobals(){
       }
       fg.append(ex);
     }
+    fg.append(mkSelect('Render mode', ['distance estimator', 'voxel field (exact, capped)'],
+                       state.flameVoxel ? 1 : 0,
+                       v => { state.flameVoxel = v; if(!v) disposeVox(); rebuildGlobals(); }, true));
+    if(state.flameVoxel){
+      fg.append(mkSelect('Voxel grid', ['64\u00b3 fast', '128\u00b3', '192\u00b3', '256\u00b3 slow'],
+                         [64,128,192,256].indexOf(state.voxelGrid) < 0 ? 1
+                           : [64,128,192,256].indexOf(state.voxelGrid),
+                         v => { state.voxelGrid = [64,128,192,256][v]; voxKey = ''; }, false));
+      const vn = document.createElement('p');
+      vn.className = 'note';
+      vn.textContent = 'The attractor is built by CHAOS GAME and distance-transformed, so there '
+        + 'is no estimator to guess with: no containers, no phantom surface, no terraces. The '
+        + 'cost is a hard detail ceiling at one voxel and a rebuild whenever a transform changes '
+        + '(about 0.5 s at 128\u00b3, several seconds at 256\u00b3). Close in, the grid itself '
+        + 'becomes visible \u2014 that is the trade, not a bug.';
+      fg.append(vn);
+    }
     const sm = document.createElement('p');
     sm.className = 'note';
     sm.textContent = 'IMAGE BOX is the accurate rule. NEAREST IMAGE often looks cleaner, and it '
@@ -2017,6 +2101,7 @@ function frame(now){
     cv.style.top  = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
   }
 
+  if(state.flameVoxel) ensureVoxField();
   renderScene(W, H);
   if(cur) $('boot')?.classList.add('done');
 

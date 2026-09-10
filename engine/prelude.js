@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.44.4-voxel-experiment';
+export const BUILD = '0.45.0-voxel-mode';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -97,6 +97,13 @@ uniform vec4  uFlameVQ[24];
 uniform vec4  uFlameVR[24];
 uniform vec3  uFlameBLo[24];   // per-map image box: the region that map is responsible for
 uniform vec3  uFlameBHi[24];
+// Voxel field: the attractor built by chaos game and distance-transformed, sampled instead of
+// estimated. Used only when the flame render mode is set to it.
+uniform highp sampler3D uSdf;   // GLSL ES has no default precision for sampler3D
+uniform vec3  uSdfLo;
+uniform vec3  uSdfHi;
+uniform float uSdfRange;       // world distance encoded by the full 0..1 texture range
+
 uniform vec3  uHullLo;         // the attractor's own bounding box
 uniform vec3  uHullHi;
 

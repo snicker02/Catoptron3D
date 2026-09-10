@@ -92,6 +92,7 @@ export function normalizeCfg(cfg){
     primStyle: Math.max(0, Math.min(2, cfg.primStyle | 0)),
     transp:   !!cfg.transp,
     aa:       Math.max(1, Math.min(4, cfg.aa | 0 || 1)),
+    voxel:    !!cfg.voxel,
     flameN:   Math.max(0, Math.min(MAX_XFORMS, cfg.flameN !== undefined
                 ? cfg.flameN : resolveFlame(cfg.flame).length)),
     flameVars: cfg.flameVars || flameVars(cfg.flame),
@@ -117,7 +118,7 @@ export function signature(cfg){
   }).join(',');
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
-          c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.bounces,
+          c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.voxel ? 1 : 0, c.bounces,
           c.flameN, c.flameSelect, (c.flameVars || []).join(''),
           (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
@@ -410,6 +411,31 @@ ${useShell ? `  // Shell: the signed distance to the SURFACE of a solid rather t
   return d;
 }
 
+${cfg.voxel ? `
+// ── the distance FIELD ──────────────────────────────────────────────────────────────────
+// No estimator, no fold stack, no selection rule. The attractor was built by chaos game and
+// distance-transformed on the CPU; this samples it. That removes the whole class of artifacts
+// the flame estimator produces — containers, phantom surface, terraces — at the cost of a
+// detail ceiling: the field cannot resolve anything finer than one voxel.
+//
+// Because it is a real distance function, the marcher, normals, ambient occlusion, reflections
+// and the headless Lipschitz gate all work on it unchanged.
+float sdfAt(vec3 p){
+  vec3 t = (p - uSdfLo) / (uSdfHi - uSdfLo);
+  vec3 q = abs(t - 0.5) - 0.5;
+  float outBox = length(max(q, 0.0)) * max(uSdfHi.x - uSdfLo.x,
+                        max(uSdfHi.y - uSdfLo.y, uSdfHi.z - uSdfLo.z));
+  if(outBox > 0.0) return outBox + uSdfRange;      // outside the grid: box distance, never a hit
+  return (texture(uSdf, t).r * 2.0 - 1.0) * uSdfRange;
+}
+
+float mapT(vec3 p, out vec4 trap, out float safe){
+  float d = sdfAt(p);
+  trap = vec4(abs(p), dot(p, p));                  // position trap: the orbit no longer exists
+  safe = d;
+  return d;
+}
+` : `
 // ── the distance estimator ──────────────────────────────────────────────────────────────
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
 // primitive's distance in folded space divided back out by it.
@@ -445,6 +471,7 @@ ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to inf
   safe = min(d, seam);
   return ${cfg.seamSurf ? 'safe' : 'd'};
 }
+`}
 
 float map(vec3 p){ vec4 t; float sf; return mapT(p, t, sf); }
 

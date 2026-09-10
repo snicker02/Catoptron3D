@@ -138,36 +138,56 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
-## Why the flame path is harder than the fold stack
+## Why the flame path is harder than the fold stack, and the voxel mode
 
 A fold is a deterministic function of `p` with a known Lipschitz bound, so `prim(p) / s` is a
 genuine distance estimate and the gates can verify it. **A general affine IFS has no such form.**
 The backward walk has to GUESS which map's image a point came from, and when the image boxes
-overlap — which one rotated transform is enough to cause — the guess is arbitrary. Every flame
-artifact in this document traces back to that one fact.
+overlap — one rotated transform is enough — the guess is arbitrary. Every flame artifact in this
+document traces back to that.
 
-Separating the flame into its own program would not change it. The problem is mathematical, not
-architectural: no amount of code separation gives a general IFS a Lipschitz bound it does not have.
+Giving the flame its own program would not change it. The problem is mathematical, not
+architectural.
 
-What WOULD change it is not estimating at all. `tools/voxel-experiment.py` builds the attractor by
-CHAOS GAME into a voxel grid — the chaos game is the attractor's definition, so it needs no
-container, no selection rule and no Lipschitz bound. Measured on the flame that prompted this:
-**1.15 s for 4 million points, 0.89 s to voxelise, 4.6% occupancy of 256^3, voxel 0.017 units.**
-It renders with none of the estimator artifacts: no terraces, no phantom planes, no container
-surfaces.
+### Render mode: voxel field
 
-The trade is real and is the reason it has not replaced the estimator:
+`Render mode` in the Flame tab switches the flame from estimating to **sampling**. The attractor is
+built by CHAOS GAME — which is its definition, so nothing is guessed — turned into a signed
+distance field by an exact euclidean distance transform, and uploaded as a 3D texture. `map()`
+samples it.
 
-| | distance estimator | voxel grid |
+Doing it as an SDF rather than as occupancy is the point: the field is a real distance function,
+so the marcher, normals, ambient occlusion, reflections and the Lipschitz reasoning all work
+unchanged. The test suite verifies it is 1-Lipschitz rather than assuming it.
+
+Implementation notes worth keeping:
+
+- **Felzenszwalb–Huttenlocher** distance transform, three separable 1D passes, linear in voxels. A
+  naive nearest-search would be O(n²) and unusable at 128³.
+- Encoded to **R8**, not float. 8-bit 3D linear filtering is core in WebGL2 while float and
+  half-float filtering are extensions, and the quantisation is FINER than the grid it encodes:
+  the near field resolves to voxel/16 and the far field saturates at 8 voxels, still a large step.
+- `sampler3D` needs an explicit `highp` — GLSL ES gives it no default precision, unlike `sampler2D`.
+- The chaos game uses a fixed xorshift seed, so a given flame always builds the same field.
+  Otherwise the image would shimmer between rebuilds.
+- Bounds come from the attractor's own extent, not the hull: the hull is a loose box for a rotated
+  attractor and spending grid resolution on empty space is exactly what to avoid.
+
+Measured at 128³ on a 5-xform flame: **540 ms to build**, 8.8% occupancy, voxel 0.033 units, 2 MB.
+
+| | distance estimator | voxel field |
 |---|---|---|
-| detail | unlimited, zoom forever | capped at the grid |
+| detail | unlimited, zoom forever | capped at one voxel |
 | correctness | approximate for a general IFS | exact to the grid |
-| artifacts | containers, terraces, phantoms | blobs below voxel size |
-| build cost | none | ~2 s per edit |
-| frame cost | fast | ~1 s naive, needs a proper DDA |
+| artifacts | containers, terraces, phantoms | the grid itself, close up |
+| rebuild | none | ~0.5 s at 128³, seconds at 256³ |
 
-At a close camera the 256^3 grid reads as blobs, which is its own kind of wrong. It is a different
-tool for a different job, and it is kept as an experiment rather than shipped.
+**Close in, the grid becomes visible.** That is the trade, not a defect — and it is why this is a
+mode rather than a replacement.
+
+One honest gap: gates 2 and 3 cannot meaningfully test the voxel shader, because the headless
+harness has no 3D texture bound and the sampler reads zero. The path is covered for COMPILATION by
+gate 1, and the field's distance property is verified in `tools/test-presets.mjs` instead.
 
 ### Missing chunks and flat slabs: rays running out of budget
 
