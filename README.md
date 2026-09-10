@@ -166,6 +166,13 @@ the compiled program signature — and the frame is drawn when the hash moves. H
 numbers costs microseconds against a frame that costs milliseconds, and the flame resolve behind it
 is memoised.
 
+The hash has to cover things that do NOT move the shader signature, and that is where the first
+version was wrong: it included each transform's matrix and amount but not its VARIATION index or
+its parameter slots. Those are uniforms, so the signature does not move either — and turning a
+variation's dial changed nothing on screen, with the frame correctly judged identical because
+nothing the hash could see had moved. The most confusing shape of bug: everything works, and
+nothing happens. The per-map image boxes and fixed points had the same gap.
+
 Anything NOT in state carries an explicit counter instead: the loaded image, the voxel field, the
 held preview. Elapsed time is included only while auto-spin is running, so a still frame does not
 redraw itself forever just because the clock advanced.

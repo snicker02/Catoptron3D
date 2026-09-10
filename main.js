@@ -906,7 +906,7 @@ function renderXforms(){
                            else touchXform();
                          }, 3));
     card.append(mkSelect('Variation', FLAME_VARIATIONS.map(v => v.name), x.vari,
-                         v => { x.vari = v; renderXforms(); pushHistory(); }, true));
+                         v => { x.vari = v; renderXforms(); touchXform(); pushHistory(); }, true));
     card.append(mkSlider('Var amount', -3, 3, 0.005, x.vamt,
                          v => { x.vamt = v; touchXform(); }, 3));
     // only the selected variation's own parameters are shown; slots are fixed, so a value set
@@ -2122,7 +2122,15 @@ function renderKey(){
   if(state.flame){
     const fm = resolveFlame(state.flame);          // memoised, so this is a hash lookup
     mix(fm.length); mix(state.flame.select | 0);
-    fm.forEach(m => { m.Mi.forEach(mix); m.Ti.forEach(mix); mix(m.expand); mix(m.vamt); });
+    fm.forEach(m => {
+      m.Mi.forEach(mix); m.Ti.forEach(mix); m.fp.forEach(mix);
+      m.blo.forEach(mix); m.bhi.forEach(mix);
+      mix(m.expand); mix(m.vamt); mix(m.vari);
+      // The variation's own PARAMETERS are uniforms, so they never move the shader signature.
+      // Leaving them out of this hash meant turning a variation's dial changed nothing on screen
+      // — the frame was correctly judged identical because nothing the hash could see had moved.
+      if(m.vp) m.vp.forEach(mix);
+    });
   }
   mix(W); mix(H); mix(renderEpoch); mix(animTime * (usesTime() ? 1 : 0));
   // curSig directly, not a field off `cur`: the entry has no stable id, and while `cur` is null

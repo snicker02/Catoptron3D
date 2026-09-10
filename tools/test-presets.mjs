@@ -684,6 +684,14 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('auto-spin makes it follow time again', r.spinFollowsTime);
     ok('and it is stable when nothing changes', r.stableWhenNothingChanges);
 
+    // The variation index and its parameter SLOTS are uniforms, so they never move the shader
+    // signature. If the redraw key ignores them, turning a variation's dial changes nothing on
+    // screen and the frame is correctly judged identical — the most confusing kind of bug.
+    const kb = src.slice(src.indexOf('function renderKey()'), src.indexOf('function usesTime()'));
+    ok('the redraw key includes the variation index', /mix\(m\.vari\)/.test(kb));
+    ok('...and its parameter slots', /m\.vp\.forEach\(mix\)/.test(kb));
+    ok('...and the per-map image boxes', /m\.blo\.forEach\(mix\)/.test(kb));
+
     ok('the frame loop only draws when the key moves',
        /if\(key !== lastDrawKey\)\{[\s\S]{0,120}renderScene\(W, H\)/.test(src));
   }
