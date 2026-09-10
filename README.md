@@ -149,6 +149,31 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+### Redraw on demand
+
+The loop called `renderScene` on **every animation frame whether or not anything had changed**, so
+a completely static image held the GPU at full load indefinitely. On a heavy IFS that is the
+difference between a card idling and a card pinned at 94% forever, for a picture that is not
+moving. Reported on a 4090, with the CPU at 10% — GPU-bound on a still frame.
+
+The frame is now drawn only when the state that reaches the shader has moved.
+
+The mechanism is deliberately not a dirty flag threaded through every control: that is exactly the
+bookkeeping that rots, because the one place that forgets to set it renders a stale frame and the
+bug is invisible until someone notices the image is wrong. Instead a hash is taken of everything
+that reaches the shader — all numeric state, the fold stack, the resolved flame, the canvas size,
+the compiled program signature — and the frame is drawn when the hash moves. Hashing about ninety
+numbers costs microseconds against a frame that costs milliseconds, and the flame resolve behind it
+is memoised.
+
+Anything NOT in state carries an explicit counter instead: the loaded image, the voxel field, the
+held preview. Elapsed time is included only while auto-spin is running, so a still frame does not
+redraw itself forever just because the clock advanced.
+
+Nine assertions cover it — camera, stack parameters, canvas size, the epoch, the program,
+time-while-static, time-while-spinning, stability when nothing changes, and that the loop actually
+guards the draw call.
+
 ### The frame budget was going on a fixed point
 
 `currentCfg()` builds the shader signature every frame, and it called `resolveFlame` to do it.

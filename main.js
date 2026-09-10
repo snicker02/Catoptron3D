@@ -736,6 +736,7 @@ function voxSignature(){
 }
 
 function disposeVox(){
+  renderEpoch++;
   if(voxTex){ gl.deleteTexture(voxTex); voxTex = null; }
   voxField = null; voxKey = '';
 }
@@ -770,7 +771,7 @@ function ensureVoxField(){
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-  voxField = f; voxKey = key;
+  voxField = f; voxKey = key; renderEpoch++;
   setStat('voxel field ' + G + '\u00b3 \u00b7 ' + (100 * f.filled / f.total).toFixed(1)
           + '% occupied \u00b7 voxel ' + f.voxel.toFixed(4));
 }
@@ -1117,6 +1118,7 @@ function tryRefine(){
 
 // Anything that changes the image drops the hold, so the preview can never go quietly stale.
 function releasePreview(){
+  renderEpoch++;
   if(!previewHold) return;
   previewHold = false;
   W = 0; H = 0;                       // force the loop to resize and redraw
@@ -2083,6 +2085,55 @@ function syncSliderDisplay(){ /* sliders are one-way; camera keys/wheel don't wr
 /* ── loop ──────────────────────────────────────────────────────────────────────────────── */
 let W = 0, H = 0, animTime = 0, lastT = 0, fpsArr = [];
 
+/* ── redraw on demand ───────────────────────────────────────────────────────────────────────
+   The loop used to call renderScene every animation frame whether or not anything had changed,
+   so a completely static image held the GPU at full load indefinitely. On a heavy IFS that is
+   the difference between a card idling and a card at 94% forever, for a picture that is not
+   moving.
+
+   Rather than tracking a dirty flag through every control — which is exactly the kind of
+   bookkeeping that rots, because the one place that forgets to set it renders a stale frame —
+   this hashes the state that actually reaches the shader and redraws when the hash moves.
+   Hashing ~90 numbers costs microseconds against a frame that costs milliseconds.
+
+   Anything that is NOT in state gets an explicit counter: the loaded image, the voxel field, the
+   compiled program, the canvas size.                                                          */
+let renderEpoch = 0;                  // bump to force a redraw for something not in state
+let lastDrawKey = '';
+
+const _rf64 = new Float64Array(1);
+const _ri32 = new Int32Array(_rf64.buffer);
+
+function renderKey(){
+  let h = 0x811c9dc5;
+  const mix = v => {
+    _rf64[0] = (typeof v === 'number' && isFinite(v)) ? v : 0;
+    h ^= _ri32[0]; h = Math.imul(h, 0x01000193) | 0;
+    h ^= _ri32[1]; h = Math.imul(h, 0x01000193) | 0;
+  };
+  for(const k in state){
+    const v = state[k];
+    if(typeof v === 'number') mix(v);
+  }
+  state.stack.forEach(sl => {
+    mix(sl.type);
+    sl.p.forEach(mix); sl.o.forEach(mix); sl.r.forEach(mix);
+  });
+  if(state.flame){
+    const fm = resolveFlame(state.flame);          // memoised, so this is a hash lookup
+    mix(fm.length); mix(state.flame.select | 0);
+    fm.forEach(m => { m.Mi.forEach(mix); m.Ti.forEach(mix); mix(m.expand); mix(m.vamt); });
+  }
+  mix(W); mix(H); mix(renderEpoch); mix(animTime * (usesTime() ? 1 : 0));
+  // curSig directly, not a field off `cur`: the entry has no stable id, and while `cur` is null
+  // a signature change would otherwise be invisible.
+  return h + '|' + curSig + '|' + (cur ? 1 : 0);
+}
+
+// Only a few things actually animate. If none of them is active the frame is genuinely static
+// and there is nothing to redraw.
+function usesTime(){ return !!state.autoSpin; }
+
 function frame(now){
   const dt0 = Math.min((now - lastT) / 1000, 0.05) || 0.016;
   lastT = now;
@@ -2119,8 +2170,13 @@ function frame(now){
   }
 
   if(state.flameVoxel) ensureVoxField();
-  renderScene(W, H);
-  if(cur) $('boot')?.classList.add('done');
+
+  const key = renderKey();
+  if(key !== lastDrawKey){
+    lastDrawKey = key;
+    renderScene(W, H);
+    if(cur) $('boot')?.classList.add('done');
+  }
 
   // Once the view has settled, redraw this same frame with supersampling. The live pass above
   // has already produced a usable image, so this only ever improves what is on screen.
@@ -2156,6 +2212,7 @@ function loadImageFile(file){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     imgReady = true;
+    renderEpoch++;                        // the texture is not in state, so say so explicitly
     imgAspect = im.width / Math.max(im.height, 1);
     imgName = file.name;
     if(state.envAmt < 0.001 && state.texAmt < 0.001) state.envAmt = 0.85;   // show it immediately
@@ -2169,6 +2226,7 @@ function loadImageFile(file){
 }
 
 function clearImage(){
+  renderEpoch++;
   imgReady = false;
   imgName = '';
   state.envAmt = 0; state.texAmt = 0;

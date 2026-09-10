@@ -639,6 +639,55 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        warm * 50 < cold, 'cold ' + cold.toFixed(2) + ' ms, warm ' + warm.toFixed(4) + ' ms');
   }
 
+  // REDRAW ON DEMAND. The loop used to call renderScene every animation frame regardless, so a
+  // static image held the GPU at full load forever. The key must move for anything that reaches
+  // the shader and must NOT move for a frame that is genuinely unchanged.
+  {
+    const src = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const blk = src.slice(src.indexOf('let renderEpoch = 0;'), src.indexOf('function frame(now){'));
+    const harness = blk + `
+      ;globalThis.__probe = () => {
+        const out = {};
+        const a = renderKey();
+        state.camDist += 0.01;            out.camera = renderKey() !== a; state.camDist -= 0.01;
+        const b = renderKey();
+        state.stack[0].p[0] += 0.5;       out.stackParam = renderKey() !== b; state.stack[0].p[0] -= 0.5;
+        const c = renderKey();
+        W += 1;                           out.canvasSize = renderKey() !== c; W -= 1;
+        const d = renderKey();
+        renderEpoch++;                    out.epoch = renderKey() !== d;
+        const e = renderKey();
+        curSig += 'x';                    out.program = renderKey() !== e;
+        const f = renderKey();
+        animTime += 5;                    out.staticIgnoresTime = renderKey() === f;
+        state.autoSpin = 0.4;
+        const g = renderKey();
+        animTime += 5;                    out.spinFollowsTime = renderKey() !== g;
+        state.autoSpin = 0;
+        const h = renderKey();
+        out.stableWhenNothingChanges = renderKey() === h;
+        return out;
+      };`;
+    const state = { camDist: 5, fov: 1.3, iters: 8, autoSpin: 0,
+                    stack: [{ type: 3, p: [1, 2], o: [0,0,0], r: [0,0,0] }], flame: null };
+    let W = 800, H = 600, animTime = 0, cur = null, curSig = 'sig';
+    const resolveFlame = () => [];
+    const fn = new Function('state', 'W', 'H', 'animTime', 'cur', 'curSig', 'resolveFlame',
+      harness + '\nreturn __probe();');
+    const r = fn(state, W, H, animTime, cur, curSig, resolveFlame);
+    ok('the redraw key follows the camera', r.camera);
+    ok('...and fold-stack parameters', r.stackParam);
+    ok('...and the canvas size', r.canvasSize);
+    ok('...and things outside state, via the epoch', r.epoch);
+    ok('...and the compiled program', r.program);
+    ok('a static frame ignores elapsed time', r.staticIgnoresTime);
+    ok('auto-spin makes it follow time again', r.spinFollowsTime);
+    ok('and it is stable when nothing changes', r.stableWhenNothingChanges);
+
+    ok('the frame loop only draws when the key moves',
+       /if\(key !== lastDrawKey\)\{[\s\S]{0,120}renderScene\(W, H\)/.test(src));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
