@@ -1768,6 +1768,23 @@ function buildGlobals(){
       g.append(an2);
     }
     if(title === 'Quality'){
+      // Reach = how far a ray can travel before the budget runs out. With a small step scale a
+      // ray creeps: it never arrives, the pixel falls back to background, and the result is
+      // missing chunks and flat slabs that look exactly like an estimator fault. Measured on one
+      // flame at step scale 0.07 with 384 steps, 20.5% of rays starved; at 0.15 it was 0.6%.
+      const est = state.stepScale > 0.001
+        ? state.steps * state.stepScale * 0.5     // rough mean advance per step, in scene units
+        : 0;
+      if(state.stepScale > 0.001 && est < state.camDist * 1.5){
+        const w = document.createElement('p');
+        w.className = 'note';
+        w.style.color = 'var(--warn1)';
+        w.textContent = 'Step scale ' + state.stepScale.toFixed(3) + ' with ' + state.steps
+          + ' steps may not reach across the scene: rays run out of budget and the pixel falls '
+          + 'back to background, which shows up as MISSING chunks and flat slabs, not as noise. '
+          + 'Raise Step scale or March steps.';
+        g.append(w);
+      }
       const nn = document.createElement('p');
       nn.className = 'note';
       nn.textContent = 'Normal smoothing widens the probe used for shading normals. Past about '
