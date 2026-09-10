@@ -138,6 +138,62 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+### Missing chunks and flat slabs: rays running out of budget
+
+The most damaging setting in this tool is a **step scale too small to cross the scene**, and
+nothing used to say so.
+
+A ray advances `stepScale` times the safe distance. Set that low and the ray creeps: it never
+arrives, the pixel falls back to background, and whole regions of geometry vanish. It does not
+look like noise — it looks like missing chunks and flat slabs, which is easy to read as an
+estimator fault.
+
+Measured on a reported flame at a 384-step budget:
+
+| step scale | ray hits | STARVED | mean steps used |
+|---|---|---|---|
+| **0.07** | 79.5% | **20.5%** | 220.9 |
+| 0.15 | 97.3% | 0.6% | 138.9 |
+| 0.30 | 97.4% | **0%** | 73.4 |
+| 0.85 | 97.2% | 0% | 25.3 |
+
+One pixel in five was starving. The Quality panel now estimates whether the budget can reach
+across the scene and says so when it cannot.
+
+Note the direction, because it is counterintuitive: a LARGER step scale rendered MORE geometry
+here, not less. Small steps feel safer — they tunnel through thin structure less — but only if
+the ray survives long enough to arrive.
+
+### Flat planes and staircases: the estimate draws the CONTAINER
+
+This is the single most useful thing to know about the flame estimator.
+
+`dist(q, container) / s` is a lower bound on the distance to the attractor, so it is SAFE — but the
+surface it draws, where the estimate reaches zero, is the **container's** surface, not the
+attractor's. Each iteration replaces the container with a smaller one, so the drawn shape
+converges to the attractor as levels are added. Stop early and you are looking at boxes.
+
+That is exactly what large smooth planes with staircase edges are. Measured on a reported flame,
+the fraction of frame that is flat plane:
+
+| iterations | flat-plane area |
+|---|---|
+| 7 | **74.3%** |
+| 11 | 39.2% |
+| 15 | **10.9%** |
+| 19 | 8.7% |
+
+**The fix is more iterations**, and rotated flames need noticeably more than axis-aligned ones: a
+rotated map's axis-aligned container is much larger than its image, so each level shrinks it by
+less than the contraction does.
+
+A tighter container was tried instead — the union of the per-map image boxes rather than the hull,
+which is a strictly larger and still valid lower bound. On a cell-classification metric it looked
+like an improvement (phantom cells 534 to 458, agreement 91.0 to 91.7), and the render was clearly
+WORSE: coverage rose from 73% to 90% and boxy slabs appeared, because a boxier container draws
+boxier geometry. Reverted. That is the fourth time in this project a metric and a picture have
+disagreed and the picture has been right.
+
 ### "Image box" is exact only while the boxes are DISJOINT
 
 The rule is exact for an affine IFS because the image of the hull under an axis-aligned map is a
