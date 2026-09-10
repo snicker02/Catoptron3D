@@ -588,6 +588,38 @@ console.log('preset format v' + PRESET_VERSION + '\n');
                             iters: 8, steps: 128, ao: false, shadow: false, glow: false,
                             bounces: 0, flameBeam: 4 });
     ok('a fold stack never gets a beam', !fold.includes('#define BEAM'));
+
+    // EVERY variation must reach the beam. The first beam ran a dynamic loop over the transforms
+    // with the linear3D inverse written in by hand, so at any search width above 1 every
+    // variation silently rendered as linear3D — the geometry was wrong and nothing said so.
+    const { FLAME_VARIATIONS } = await import(new URL('../engine/flame.js', import.meta.url).href);
+    [1, 2, 4].forEach(width => {
+      const seen = new Set();
+      for(let v = 0; v < FLAME_VARIATIONS.length; v++){
+        const g = parseFlameTop(readFileSync(
+          new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+        g.select = 3;
+        g.maps.forEach(x => { x.vari = v; });
+        seen.add(assemble({ stack: [{ type: 26, p: [0.2] }], prim: HULL, iters: 6, steps: 128,
+                            ao: false, shadow: false, glow: false, bounces: 0,
+                            flame: g, flameBeam: width }));
+      }
+      ok('search width ' + width + ' emits a distinct shader for all ' +
+         FLAME_VARIATIONS.length + ' variations',
+         seen.size === FLAME_VARIATIONS.length, seen.size + ' distinct');
+    });
+
+    // and the beam must not carry a hand-written inverse of its own
+    const bsrc = (() => {
+      const g = parseFlameTop(readFileSync(
+        new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+      g.select = 3; g.maps.forEach(x => { x.vari = 2; });   // swirl
+      return assemble({ stack: [{ type: 26, p: [0.2] }], prim: HULL, iters: 6, steps: 128,
+                        ao: false, shadow: false, glow: false, bounces: 0, flame: g, flameBeam: 2 });
+    })();
+    ok('the beam unrolls per transform rather than looping over them',
+       !/for\(int i = 0; i < FLAME_N; i\+\+\)/.test(bsrc));
+    ok('and a swirl in the beam really is a swirl', /float kk = uFlameVP\[0\]\.x;/.test(bsrc));
     // and the voxel path wins over both, since it has no walk at all
     const vox = mk({ flameBeam: 4, voxel: true });
     ok('voxel mode overrides the beam',

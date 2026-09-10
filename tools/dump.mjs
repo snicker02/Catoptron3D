@@ -156,6 +156,9 @@ const deStacks = [
   { label: 'flame deep 12',  stack: [{ type: 26, p: [1] }], iters: 12, prim: 7,
     flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/jerusalem-cube.flame', import.meta.url),'utf8'));
                     f.select = 2; return f; })() },
+  { label: 'flame beam 2 swirl', stack: [{ type: 26, p: [1] }], iters: 5, prim: 7, flameBeam: 2,
+    flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/flame-ifs-base.flame', import.meta.url),'utf8'));
+                    f.select = 3; f.maps.forEach(x => { x.vari = 2; }); return f; })() },
   { label: 'flame beam 2',   stack: [{ type: 26, p: [1] }], iters: 6, prim: 7, flameBeam: 2,
     flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/flame-ifs-base.flame', import.meta.url),'utf8'));
                     f.select = 3; return f; })() },

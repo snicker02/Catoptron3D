@@ -452,34 +452,34 @@ float mapT(vec3 p, out vec4 trap, out float safe){
       if(b >= live) break;
       vec3 pb = bq[b] - uO0;
       pb = rotE3inv(pb, uR0);
-      for(int i = 0; i < FLAME_N; i++){
+${(cfg.flameVars || []).slice(0, cfg.flameN).map((v, k) => `
+      {
+        // Unrolled per transform, exactly as the greedy walk is, so each one gets ITS OWN
+        // variation inverse. The first version of this beam ran a dynamic loop over the
+        // transforms with the linear3D inverse written in by hand, which meant every variation
+        // silently rendered as linear3D the moment search width went above 1.
         vec3 q = pb;
         float ve = 1.0;
-        float A = uFlameVAmt[i]; A = abs(A) < 1e-5 ? 1e-5 : A;
-        q = q / A; ve = 1.0 / abs(A);
-        q = uFlameMi[i] * q + uFlameTi[i];
-        float ex = ve * uFlameEx[i];
-${cfg.flameSelect === 2 ? `        float d = sdBoxLoHi(pb, uFlameBLo[i], uFlameBHi[i]) / bs[b];` :
-  cfg.flameSelect === 3 ? `        float d = mix(sdBoxLoHi(pb, uFlameBLo[i], uFlameBHi[i]),
+${(V_INV[v] || V_INV[0])(k)}
+        q = uFlameMi[${k}] * q + uFlameTi[${k}];
+        float ex = ve * uFlameEx[${k}];
+${cfg.flameSelect === 2 ? `        float d = sdBoxLoHi(pb, uFlameBLo[${k}], uFlameBHi[${k}]) / bs[b];` :
+  cfg.flameSelect === 3 ? `        float d = mix(sdBoxLoHi(pb, uFlameBLo[${k}], uFlameBHi[${k}]),
                       length(q), clamp(uSelBlend, 0.0, 1.0)) / bs[b];` :
-  cfg.flameSelect === 1 ? `        float d = dot(pb - uFlameFp[i], pb - uFlameFp[i]) / bs[b];` :
+  cfg.flameSelect === 1 ? `        float d = dot(pb - uFlameFp[${k}], pb - uFlameFp[${k}]) / bs[b];` :
 `        float d = dot(q, q) / bs[b];`}
         d *= uP0_0.x;
-        // insertion into the running best-BEAM, cheaper than sorting BEAM*FLAME_N candidates
         vec3 cq = rotE3(q, uR0) + uO0;
-        {
-          vec3 dd = rotE3((cq - uIfsCenter) * uIfsScale, uIfsRot);
-          cq = dd + uIfsCenter;
-        }
+        cq = rotE3((cq - uIfsCenter) * uIfsScale, uIfsRot) + uIfsCenter;
         float cs = bs[b] * ex * uIfsScale;
         for(int j = 0; j < BEAM; j++){
           if(d < nd[j]){
-            for(int k = BEAM - 1; k > j; k--){ nd[k] = nd[k-1]; nq[k] = nq[k-1]; ns[k] = ns[k-1]; }
+            for(int m = BEAM - 1; m > j; m--){ nd[m] = nd[m-1]; nq[m] = nq[m-1]; ns[m] = ns[m-1]; }
             nd[j] = d; nq[j] = cq; ns[j] = cs;
             break;
           }
         }
-      }
+      }`).join('')}
       nlive = BEAM;
     }
     live = nlive;

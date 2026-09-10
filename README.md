@@ -241,6 +241,13 @@ ground truth and made the beam look WORSE, because cells the chaos game had simp
 yet were being counted as phantom. And the cost grows faster than the width: the insertion into
 the running best-K is branchy, and the shader's register pressure rises with it.
 
+The beam **unrolls per transform**, exactly as the greedy walk does, so each transform gets its
+own variation inverse. The first version looped over the transforms dynamically with the linear3D
+inverse written in by hand, which meant that at any search width above 1 every variation silently
+rendered as linear3D: wrong geometry, no error, and only visible if you happened to switch a
+variation while the width was raised. The test suite now asserts that all 23 variations produce a
+distinct shader at each of the three widths.
+
 Navigate at width 1 and raise it for the save. It only applies to a stack that is exactly one
 Flame IFS op — anything else interleaves operators between the levels, so there are no branches
 to carry.
