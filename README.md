@@ -138,6 +138,37 @@ across the flat panels, normals a uniform constant. That eliminated the estimato
 the normal calculation in a single render and left only shading terms. Guessing at colour,
 precision and step scale in turn had cost several rounds before that.
 
+## Why the flame path is harder than the fold stack
+
+A fold is a deterministic function of `p` with a known Lipschitz bound, so `prim(p) / s` is a
+genuine distance estimate and the gates can verify it. **A general affine IFS has no such form.**
+The backward walk has to GUESS which map's image a point came from, and when the image boxes
+overlap — which one rotated transform is enough to cause — the guess is arbitrary. Every flame
+artifact in this document traces back to that one fact.
+
+Separating the flame into its own program would not change it. The problem is mathematical, not
+architectural: no amount of code separation gives a general IFS a Lipschitz bound it does not have.
+
+What WOULD change it is not estimating at all. `tools/voxel-experiment.py` builds the attractor by
+CHAOS GAME into a voxel grid — the chaos game is the attractor's definition, so it needs no
+container, no selection rule and no Lipschitz bound. Measured on the flame that prompted this:
+**1.15 s for 4 million points, 0.89 s to voxelise, 4.6% occupancy of 256^3, voxel 0.017 units.**
+It renders with none of the estimator artifacts: no terraces, no phantom planes, no container
+surfaces.
+
+The trade is real and is the reason it has not replaced the estimator:
+
+| | distance estimator | voxel grid |
+|---|---|---|
+| detail | unlimited, zoom forever | capped at the grid |
+| correctness | approximate for a general IFS | exact to the grid |
+| artifacts | containers, terraces, phantoms | blobs below voxel size |
+| build cost | none | ~2 s per edit |
+| frame cost | fast | ~1 s naive, needs a proper DDA |
+
+At a close camera the 256^3 grid reads as blobs, which is its own kind of wrong. It is a different
+tool for a different job, and it is kept as an experiment rather than shipped.
+
 ### Missing chunks and flat slabs: rays running out of budget
 
 The most damaging setting in this tool is a **step scale too small to cross the scene**, and
