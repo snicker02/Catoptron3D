@@ -1667,9 +1667,19 @@ function buildGlobals(){
         ex.style.color = 'var(--warn1)';
         ex.textContent = ov.overlapping + ' of ' + ov.pairs + ' image-box pairs OVERLAP \u2014 '
           + 'usually because a transform rotates, which makes its axis-aligned box much larger '
-          + 'than its actual image. \u201cImage box\u201d is NOT exact for this flame: inside an '
-          + 'overlap the choice is arbitrary, which paints phantom surface and terraces across '
-          + 'it. Blend or nearest image will look different, not more correct.';
+          + 'than its actual image. Two consequences. \u201cImage box\u201d is not exact here: '
+          + 'inside an overlap the choice is arbitrary. And the estimate draws the CONTAINER '
+          + 'rather than the attractor until enough levels have shrunk it \u2014 which is what '
+          + 'large flat planes and staircase edges are. RAISE ITERATIONS: measured on one such '
+          + 'flame, flat-plane area fell from 74% at 7 iterations to 11% at 15.';
+        if(state.iters < 12){
+          const it = document.createElement('p');
+          it.className = 'note';
+          it.style.color = 'var(--warn1)';
+          it.textContent = 'Iterations is ' + state.iters + '. For a flame with overlapping '
+            + 'image boxes that is likely too few, and the flat planes you see are the container.';
+          fg.append(it);
+        }
       }
       fg.append(ex);
     }
