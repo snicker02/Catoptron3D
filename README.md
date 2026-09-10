@@ -149,6 +149,28 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+### The export must not busy-wait
+
+Saving a PNG froze the browser and produced no file. The export waited for the supersampled
+program to link by spinning on `cache.request` in a `while` loop, up to eight seconds.
+
+That cannot work, and the reason is worth keeping: a parallel shader compile reports completion
+through the GL driver, and the driver generally needs the main thread to **return to the event
+loop** before it will. Busy-waiting blocks the very thing it is waiting for. So the loop ran its
+full timeout with the tab frozen, gave up, and silently fell back to 1x1 — or the encode failed
+outright.
+
+The wait now yields through `requestAnimationFrame`, and both `savePNG` and `quickRender` are
+async. Blocking was defended in a comment at the time as acceptable "because an explicit export
+expects a wait". It was not: an explicit export expects a WAIT, not a frozen tab, and the wait was
+being spent preventing the work from finishing.
+
+Two things fall out of making it async. The export claims the canvas **before** its first await,
+because the frame loop keeps running and would otherwise resize the canvas back mid-export. And
+the restore is idempotent with a watchdog behind it: if `toBlob` never calls back, which a large
+enough canvas can cause, the lock would stay held and the viewport would never draw again —
+indistinguishable from a frozen program.
+
 ### Redraw on demand
 
 The loop called `renderScene` on **every animation frame whether or not anything had changed**, so

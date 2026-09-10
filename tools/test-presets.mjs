@@ -696,6 +696,33 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        /if\(key !== lastDrawKey\)\{[\s\S]{0,120}renderScene\(W, H\)/.test(src));
   }
 
+  // EXPORT MUST NOT BLOCK. The export used to spin on cache.request waiting for the supersampled
+  // program to link. That cannot work: a parallel compile reports completion through the driver,
+  // which generally needs the main thread back in the event loop first, so the busy-wait blocked
+  // the very thing it waited for — an 8-second frozen tab and then a silent fallback to 1x1.
+  {
+    const js2 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    ok('nothing busy-waits on a program', !/while\s*\(\s*!r\.ready/.test(js2));
+    ok('the program wait yields to the event loop',
+       /function awaitProgram[\s\S]{0,400}requestAnimationFrame\(tick\)/.test(js2));
+    ok('export and quick render are async', /async function savePNG\(/.test(js2) &&
+       /async function quickRender\(/.test(js2));
+    ok('and both await the program', (js2.match(/await withSamples\(/g) || []).length === 2);
+
+    // the canvas lock must be released on EVERY path, including one that never calls back
+    // slice FORWARD from savePNG. quickRender is defined earlier in the file, so slicing to it
+    // runs backwards and yields nothing — the same mistake that once corrupted the README.
+    const spStart = js2.indexOf('async function savePNG(');
+    const spEnd = js2.indexOf('\nfunction ', spStart);
+    const sp = js2.slice(spStart, spEnd > spStart ? spEnd : spStart + 4000);
+    ok('the savePNG slice is non-empty', sp.length > 500, sp.length + ' chars');
+    ok('the frame loop stands off during an export', /if\(exporting\)\{/.test(js2));
+    ok('restore runs at most once', /if\(restored\) return;/.test(sp));
+    ok('a watchdog releases the lock if encoding never calls back',
+       /setTimeout\([\s\S]{0,200}restore\(\)/.test(sp));
+    ok('the watchdog is cancelled on success', /clearTimeout\(watchdog\)/.test(sp));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
@@ -963,8 +990,8 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('neither sets renderAA without requesting a program',
        !/renderAA = Math\.max\([^)]*\);\s*\n\s*renderScene/.test(js));
     const ws = js.slice(js.indexOf('function withSamples('), js.indexOf('function renderScene('));
-    ok('withSamples waits for a parallel compile', ws.includes('while(!r.ready'));
-    ok('and falls back to 1x1 rather than the wrong program', ws.includes('renderAA = 1;'));
+    ok('withSamples waits for the program without blocking', ws.includes('await awaitProgram('));
+    ok('and falls back rather than using the wrong program', ws.includes('else ok = false;'));
 
     // and the one that was actually missing
     const build = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function buildPanel()'));

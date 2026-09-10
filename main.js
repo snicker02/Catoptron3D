@@ -272,25 +272,47 @@ let renderAA = 1;
 // so they kept using the program built for the viewport — every save came out at 1x1 however
 // the control was set. The program has to be requested here, and waited for, because a parallel
 // compile is not ready on the same tick.
-function withSamples(n, draw){
-  const prevAA = renderAA, prevCur = cur, prevSig = curSig;
-  renderAA = Math.max(1, Math.min(4, Math.round(n)));
-  let ok = true;
-  if(renderAA !== 1){
-    const cfg = currentCfg();
-    let r = cache.request(cfg);
-    // Blocking poll. This is ONLY for an explicit export or quick render, where the person asked
-    // for an image and a short wait is expected — a save that silently used the wrong program is
-    // worse than one that takes a moment. The automatic idle refinement must never come through
-    // here: it would stall the interface for the whole link time every time the view settled.
+// Wait for a program WITHOUT blocking the main thread.
+//
+// The previous version spun on cache.request in a while loop. That cannot work: a parallel
+// shader compile reports completion through the GL driver, and the driver generally needs the
+// main thread to return to the event loop before it will. Busy-waiting blocks the very thing it
+// is waiting for, so the loop ran its full 8-second timeout with the tab frozen and then gave up
+// and fell back to 1x1 — which is exactly what "the browser freezes and the image will not save"
+// looks like from outside.
+function awaitProgram(cfg, ms = 10000){
+  return new Promise(resolve => {
     const t0 = performance.now();
-    while(!r.ready && !r.error && performance.now() - t0 < 8000) r = cache.request(cfg);
-    if(r.ready) cur = r.entry;
-    else { ok = false; renderAA = 1; cur = prevCur; }
+    const tick = () => {
+      const r = cache.request(cfg);
+      if(r.ready || r.error || performance.now() - t0 > ms) return resolve(r);
+      requestAnimationFrame(tick);            // yield, so the link can actually finish
+    };
+    tick();
+  });
+}
+
+// True while an export owns the canvas. The frame loop must not resize or draw over it.
+let exporting = false;
+
+async function withSamples(n, draw){
+  const want = Math.max(1, Math.min(4, Math.round(n)));
+  const prevAA = renderAA, prevCur = cur, prevSig = curSig;
+  let entry = cur, used = 1, ok = true;
+
+  if(want !== 1){
+    renderAA = want;
+    const cfg = currentCfg();
+    renderAA = prevAA;
+    const r = await awaitProgram(cfg);
+    if(r.ready){ entry = r.entry; used = want; }
+    else ok = false;
   }
-  try { draw(renderAA, ok); }
+  renderAA = used; cur = entry;
+  try { draw(used, ok); }
   finally { renderAA = prevAA; cur = prevCur; curSig = prevSig; }
 }
+
 
 
 function renderScene(w, h){
@@ -1049,27 +1071,32 @@ function showTab(which){
    file will too, because the same call produced both. */
 let previewHold = false;
 
-function quickRender(){
+async function quickRender(){
   if(!cur){ setStat('shader still building\u2026'); return; }
+  if(exporting){ setStat('already rendering\u2026'); return; }
   const [sw, sh] = exportDims();
   const pw = cv.width, ph = cv.height;
 
+  exporting = true;
   cv.width = sw; cv.height = sh;
   if(cv.width !== sw || cv.height !== sh){
     cv.width = pw; cv.height = ph; W = 0; H = 0;
+    exporting = false;
     setStat('that size was refused by the browser');
     return;
   }
   let usedAA = 1;
-  withSamples(state.aaExport, (n, ok) => {
+  await withSamples(state.aaExport, (n, ok) => {
     usedAA = n;
     if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
     renderScene(cv.width, cv.height);
   });
   if(gl.isContextLost()){
+    exporting = false;
     setStat('context lost \u2014 reload and try a smaller window');
     return;
   }
+  exporting = false;                     // the preview hold keeps the frame, not the export lock
   previewHold = true;
   $('quickBtn').classList.add('on');
   setStat('preview ' + sw + '\u00d7' + sh + ' at ' + usedAA + '\u00d7' + usedAA +
@@ -2154,6 +2181,10 @@ function frame(now){
 
   syncProgram(now);
 
+  if(exporting){                      // an export owns the canvas; do not resize or draw over it
+    requestAnimationFrame(frame);
+    return;
+  }
   if(previewHold){                    // a held preview is a still; do not redraw over it
     requestAnimationFrame(frame);
     return;
@@ -2363,31 +2394,50 @@ function offerSaveLink(url, name){
   host.append(a);
 }
 
-function savePNG(){
+async function savePNG(){
   if(!cur){ setStat('shader still building\u2026'); return; }
+  if(exporting){ setStat('already exporting\u2026'); return; }
 
   const [sw, sh] = exportDims();
   const pw = cv.width, ph = cv.height;
 
+  // Claim the canvas BEFORE the first await. The frame loop runs while we wait for the program,
+  // and it would otherwise resize the canvas back to the viewport mid-export.
+  exporting = true;
   cv.width = sw; cv.height = sh;
   if(cv.width !== sw || cv.height !== sh){          // allocation refused outright
     cv.width = pw; cv.height = ph; W = 0; H = 0;
+    exporting = false;
     setStat('export size refused by the browser');
     return;
   }
   setStat('rendering ' + sw + '\u00d7' + sh + '\u2026');
-  withSamples(state.aaExport, (n, ok) => {
+  await withSamples(state.aaExport, (n, ok) => {
     if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
     renderScene(cv.width, cv.height);
   });
   if(gl.isContextLost()){
+    exporting = false;
     setStat('context lost during export \u2014 reload and try a smaller window');
     return;
   }
 
   const outW = cv.width, outH = cv.height;
   const name = 'catoptron3d_' + outW + 'x' + outH + '_' + Date.now() + '.png';
-  const restore = () => { cv.width = pw; cv.height = ph; W = 0; H = 0; };
+  // Restore exactly once, however the export ends. If toBlob never calls back — which a large
+  // enough canvas can cause — the lock would otherwise stay held and the viewport would never
+  // draw again, which looks identical to a frozen program.
+  let restored = false;
+  const restore = () => {
+    if(restored) return;
+    restored = true;
+    cv.width = pw; cv.height = ph; W = 0; H = 0; exporting = false;
+  };
+  const watchdog = setTimeout(() => {
+    if(restored) return;
+    restore();
+    setStat('encoding gave up \u2014 try a smaller export size');
+  }, 120000);
 
   if(!cv.toBlob){                                    // very old browser
     restore();
@@ -2397,6 +2447,7 @@ function savePNG(){
 
   setStat('encoding ' + outW + '\u00d7' + outH + '\u2026');
   cv.toBlob(async blob => {
+    clearTimeout(watchdog);
     restore();
     if(!blob){ setStat('export failed \u2014 try a smaller window'); return; }
 
