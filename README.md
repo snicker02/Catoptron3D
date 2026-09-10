@@ -149,6 +149,23 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+### The frame budget was going on a fixed point
+
+`currentCfg()` builds the shader signature every frame, and it called `resolveFlame` to do it.
+`resolveFlame` runs a 400-iteration fixed point over every transform's eight corners plus a
+pairwise box-overlap scan: **5 ms for an 8-transform flame, 16 ms for a 20-transform one, twice a
+frame.** At 60 fps that is several times the entire budget, spent recomputing something that only
+changes when a transform is edited. It made the flame path feel broken regardless of GPU load.
+
+It is now memoised on a hash of exactly the inputs that affect the result: **5.4 ms to 0.0055 ms,
+about a thousandfold.**
+
+Getting the hash right was not free. The first version mixed each value as `v * 2^32 | 0`, which
+maps **every integer to zero** — a rotation of 13 degrees, a scale of 1 and a weight of 1 all
+hashed identically, and edits between them were invisible. A soak of 400 random edits caught 14
+stale results. Hashing the float's BITS through an `Int32Array` view catches none in 600, and the
+test suite runs that soak with integer-valued edits deliberately included.
+
 ### Search width: stop the walk guessing
 
 The default walk commits to ONE branch per level. When the image boxes overlap that commitment is

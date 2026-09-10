@@ -594,6 +594,51 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        !vox.includes('#define BEAM') && vox.includes('float sdfAt(vec3 p)'));
   }
 
+  // RESOLVE CACHE. currentCfg() calls resolveFlame on every frame to build the shader signature,
+  // and resolveFlame runs a 400-iteration fixed point over every map's corners: 5 ms for 8 maps,
+  // 16 ms for 20, twice a frame. That is the entire frame budget spent recomputing something that
+  // only changes when a transform is edited.
+  //
+  // The cache must never return a stale result, which is not free to get right: the first hash
+  // used `v * 2^32 | 0`, mapping EVERY integer to zero, so rotations of 13 degrees and scales of
+  // 1 were invisible to it.
+  {
+    const { invalidateFlameCache } = await import(new URL('../engine/flame.js', import.meta.url).href);
+    const fc = parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+    const snap = () => JSON.stringify(resolveFlame(fc).map(m => [m.M, m.T, m.blo, m.bhi, m.scale]));
+
+    let stale = 0;
+    let seed = 987654321;
+    const rnd = () => { seed ^= seed << 13; seed |= 0; seed ^= seed >>> 17;
+                        seed ^= seed << 5; seed |= 0; return (seed >>> 0) / 4294967296; };
+    for(let t = 0; t < 300; t++){
+      const m = fc.maps[(rnd() * fc.maps.length) | 0];
+      const pick = (rnd() * 6) | 0;
+      // integer-valued edits included ON PURPOSE: they are what the broken hash missed
+      if(pick === 0) m.rot[(rnd() * 3) | 0] += Math.round(rnd() * 20 - 10);
+      else if(pick === 1) m.tr[(rnd() * 3) | 0] += rnd() * 0.4 - 0.2;
+      else if(pick === 2) m.vamt = Math.max(0.05, m.vamt + rnd() * 0.3 - 0.15);
+      else if(pick === 3) m.scale = Math.max(1, Math.round(m.scale + rnd() * 2));
+      else if(pick === 4) m.T[(rnd() * 3) | 0] += Math.round(rnd() * 4 - 2);
+      else m.on = rnd() < 0.85;
+      const cached = snap();
+      invalidateFlameCache();
+      if(cached !== snap()) stale++;
+    }
+    ok('the resolve cache never returns a stale result', stale === 0, stale + ' of 300 edits');
+
+    // and it must actually be a cache
+    invalidateFlameCache();
+    let t0 = Date.now(); for(let i = 0; i < 40; i++){ invalidateFlameCache(); resolveFlame(fc); }
+    const cold = (Date.now() - t0) / 40;
+    resolveFlame(fc);
+    t0 = Date.now(); for(let i = 0; i < 4000; i++) resolveFlame(fc);
+    const warm = (Date.now() - t0) / 4000;
+    ok('a warm resolve is at least 50x faster than a cold one',
+       warm * 50 < cold, 'cold ' + cold.toFixed(2) + ' ms, warm ' + warm.toFixed(4) + ' ms');
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
