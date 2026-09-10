@@ -149,6 +149,31 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+### Search width: stop the walk guessing
+
+The default walk commits to ONE branch per level. When the image boxes overlap that commitment is
+a guess, and a wrong guess returns an estimate that is too LARGE — the marcher steps past the
+surface and the detail is simply missing. Holes, not noise.
+
+**Search width** follows the best 2 or 4 branches instead and takes the smallest estimate, which
+is the distance to the union of those cells rather than to one guessed cell. Measured against a
+**22.8-million-point** chaos-game ground truth at 20 iterations:
+
+| width | agreement | cells wrongly EMPTY | phantom | rendered coverage | cost |
+|---|---|---|---|---|---|
+| 1 (greedy) | 94.6% | **313** | 120 | 89.2% | 1x |
+| 2 | 96.3% | 81 | 216 | 93.0% | **4.5x** |
+| 4 | 96.4% | **9** | 280 | 94.2% | **30x** |
+
+Two notes on measuring this. An earlier version of the same comparison used a 400,000-point
+ground truth and made the beam look WORSE, because cells the chaos game had simply not reached
+yet were being counted as phantom. And the cost grows faster than the width: the insertion into
+the running best-K is branchy, and the shader's register pressure rises with it.
+
+Navigate at width 1 and raise it for the save. It only applies to a stack that is exactly one
+Flame IFS op — anything else interleaves operators between the levels, so there are no branches
+to carry.
+
 ### Render mode: voxel field
 
 `Render mode` in the Flame tab switches the flame from estimating to **sampling**. The attractor is

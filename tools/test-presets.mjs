@@ -564,6 +564,36 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        [...f.bytes].some(b => b < 128) && [...f.bytes].some(b => b > 128));
   }
 
+  // BEAM. A wider search must produce a DIFFERENT program, must replace the greedy estimator
+  // rather than sit beside it, and must never apply to a stack it cannot carry branches through.
+  {
+    const { assemble, signature, PRIMS } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const HULL = PRIMS.findIndex(p => p.name === 'Flame hull');
+    const fl2 = parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+    const mk = o => assemble({ stack: [{ type: 26, p: [0.2] }], prim: HULL, iters: 8, steps: 128,
+                               ao: false, shadow: false, glow: false, bounces: 0, flame: fl2, ...o });
+    const one = mk({}), two = mk({ flameBeam: 2 }), four = mk({ flameBeam: 4 });
+    ok('beam width changes the program',
+       signature({ stack: [{ type: 26, p: [0.2] }], prim: HULL, iters: 8, steps: 128, flame: fl2 }) !==
+       signature({ stack: [{ type: 26, p: [0.2] }], prim: HULL, iters: 8, steps: 128, flame: fl2, flameBeam: 2 }));
+    ok('width 1 stays greedy', !one.includes('#define BEAM'));
+    ok('width 2 and 4 emit a beam',
+       two.includes('#define BEAM 2') && four.includes('#define BEAM 4'));
+    [['greedy', one], ['beam 2', two], ['beam 4', four]].forEach(([nm, src]) => {
+      ok(nm + ' defines exactly one mapT', (src.match(/float mapT\(/g) || []).length === 1);
+    });
+    // a fold stack interleaves operators between levels, so there is nothing to carry
+    const fold = assemble({ stack: [{ type: 8, p: [0.42] }, { type: 5, p: [1] }], prim: 0,
+                            iters: 8, steps: 128, ao: false, shadow: false, glow: false,
+                            bounces: 0, flameBeam: 4 });
+    ok('a fold stack never gets a beam', !fold.includes('#define BEAM'));
+    // and the voxel path wins over both, since it has no walk at all
+    const vox = mk({ flameBeam: 4, voxel: true });
+    ok('voxel mode overrides the beam',
+       !vox.includes('#define BEAM') && vox.includes('float sdfAt(vec3 p)'));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
