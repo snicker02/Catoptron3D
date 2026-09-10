@@ -4,6 +4,8 @@ import { OPS, discIdx, bankCount, defaults } from '../engine/ops.js';
 import { HELPERS } from '../engine/helpers.js';
 import { assemble, signature, PRIMS, MARCH_STEPS } from '../engine/assemble.js';
 import { parseFlame, resolveFlame, flameVars } from '../engine/flame.js';
+import { FACTORY } from '../engine/factory.js';
+import { apply as applyPreset } from '../engine/preset.js';
 import { readFileSync } from 'node:fs';
 const FLAME = parseFlame(readFileSync(new URL('../examples/sierpinski-tetrahedron.flame', import.meta.url), 'utf8'));
 
@@ -54,6 +56,29 @@ PRIMS.forEach((_, pi) => {
     });
   });
 });
+// Every FACTORY preset through the same gates as everything else: a preset that ships with the
+// tool and does not compile, or renders an empty frame, is worse than no preset.
+{
+  const src = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const defaults = (new Function(
+    src.slice(src.indexOf('const state = {'), src.indexOf('\n};')) + '\n};\nreturn state;'))();
+  FACTORY.forEach(p => {
+    const r = applyPreset(p, defaults, OPS);
+    const st = { ...defaults, ...r.state };
+    shaders.push({
+      label: 'factory: ' + p.name,
+      src: assemble({
+        stack: r.stack.map(sl => ({ type: sl.type, p: sl.p, o: sl.o, r: sl.r })),
+        prim: st.prim, primStyle: st.primStyle, iters: st.iters,
+        steps: Math.min(st.steps, 256), ao: st.ao > 0, shadow: st.shadow > 0,
+        glow: st.glow > 0, bounces: Math.min(st.bounces, 1),
+        transp: st.transp > 0, disp: st.disp > 0, feedback: st.feedback,
+        seamSurf: st.seamSurf > 0.5
+      })
+    });
+  });
+}
+
 [1, 2, 3, 4].forEach(a => shaders.push({
   label: `aa ${a}x${a}`,
   src: assemble({ stack: [], prim: 0, iters: 4, steps: 128, ao: true, shadow: false,

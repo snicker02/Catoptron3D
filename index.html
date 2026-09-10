@@ -205,6 +205,10 @@ button.xa.on{background:var(--ice1);border-color:var(--ice1)}
   color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
 }
 .tin::placeholder{color:var(--note)}
+label.chk{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;
+  color:var(--note);cursor:pointer}
+label.chk input{margin:0}
+#presetList optgroup{font-style:normal;color:var(--note);font-family:var(--mono)}
 textarea.tin{resize:vertical;line-height:1.4;min-height:52px}
 .tin:focus-visible{outline:2px solid var(--ice1);outline-offset:2px}
 .savelink{margin-top:6px}
@@ -318,8 +322,12 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <select id="presetList" aria-label="Saved presets" style="margin-top:5px"></select>
     <div class="row" style="margin-top:5px">
       <button id="presetLoad">load</button>
+      <button id="presetRename">rename</button>
       <button id="presetDelete">delete</button>
     </div>
+    <label class="chk" style="margin-top:5px">
+      <input type="checkbox" id="keepCam"> keep current camera
+    </label>
     <div class="row" style="margin-top:5px">
       <button id="presetCopy">copy</button>
       <button id="presetPaste">paste</button>
@@ -328,7 +336,12 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
       <button id="presetExport">export .json</button>
       <button id="presetImport">import</button>
     </div>
+    <div class="row" style="margin-top:5px">
+      <button id="libExport">export all</button>
+      <button id="libImport">import all</button>
+    </div>
     <input type="file" id="presetFile" accept="application/json,.json" hidden>
+    <input type="file" id="libFile" accept="application/json,.json" hidden>
     <div id="pasteBox" style="display:none;margin-top:6px">
       <textarea id="pasteText" class="tin" rows="4" spellcheck="false"
                 placeholder="paste a preset, a share link, or an encoded payload"></textarea>
@@ -339,11 +352,6 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     </div>
     <p class="note">Saved in this browser. Export or copy a link to keep a look anywhere.
     A loaded image is not part of a preset — reload it after.</p>
-  </div>
-
-  <div class="group">
-    <h2>Starters</h2>
-    <div id="starters" class="starters"></div>
   </div>
 
   <div id="globals"></div>

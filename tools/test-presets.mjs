@@ -644,6 +644,73 @@ console.log('preset format v' + PRESET_VERSION + '\n');
   ok('and explains what it expected', /JSON|link|payload/.test(msg), msg);
 }
 
+// 11d. FACTORY PRESETS. The former Starters table is now engine/factory.js, generated from it.
+//      These must be real presets in the real format, must reproduce the starters they replaced,
+//      and must cover BOTH regimes — a preset layer that only handled fractals would be useless
+//      for mirror scenes, which need contraction 1.0 and the camera inside the shell spacing.
+{
+  const { FACTORY } = await import(new URL('../engine/factory.js', import.meta.url).href);
+  // Factory presets were captured against main.js's REAL default state, not the small synthetic
+  // one this file uses elsewhere. Comparing them against the wrong baseline makes every preset
+  // look unstable, because capture only records values that differ from the defaults it is given.
+  const mainSrc = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  const realDefaults = (new Function(
+    mainSrc.slice(mainSrc.indexOf('const state = {'), mainSrc.indexOf('\n};')) +
+    '\n};\nreturn state;'))();
+  ok('factory presets exist', FACTORY.length >= 15, FACTORY.length + '');
+  ok('every factory preset is versioned and named',
+     FACTORY.every(p => p.v === PRESET_VERSION && p.name && Array.isArray(p.k)));
+
+  // round-trip: apply then re-capture must be stable
+  let unstable = [];
+  FACTORY.forEach(p => {
+    const r = apply(p, realDefaults, OPS);
+    const st = { ...realDefaults, ...r.state, stack: r.stack, flame: r.flame || null };
+    const again = capture(st, realDefaults, OPS, p.name);
+    if(JSON.stringify(again.s) !== JSON.stringify(p.s) ||
+       JSON.stringify(again.k) !== JSON.stringify(p.k)) unstable.push(p.name);
+  });
+  ok('every factory preset survives state -> JSON -> state unchanged',
+     unstable.length === 0, unstable.slice(0, 3).join(', '));
+
+  // both regimes present
+  const scales = FACTORY.map(p => apply(p, realDefaults, OPS).state.ifsScale);
+  ok('the fractal regime is covered (contraction well above 1)',
+     scales.some(v => v > 1.5), 'max ' + Math.max(...scales));
+  ok('the mirror regime is covered (contraction 1.0)',
+     scales.filter(v => Math.abs(v - 1) < 1e-9).length >= 5,
+     scales.filter(v => Math.abs(v - 1) < 1e-9).length + ' presets');
+
+  // a mirror preset must actually put the camera INSIDE the shell spacing, or it shows a dead box
+  const mirror = FACTORY.filter(p => {
+    const st = apply(p, realDefaults, OPS);
+    // the mirror-HALL presets specifically. "Clay corner" also contains "corner" but is a
+    // city-scale scene at camDist 26, and matching it made this assertion meaningless.
+    return Math.abs(st.state.ifsScale - 1) < 1e-9 &&
+           /^(mirror|kaleidoscope|hex mirror)/i.test(p.name);
+  });
+  ok('mirror presets put the camera inside the shell spacing',
+     mirror.length >= 3 && mirror.every(p => apply(p, realDefaults, OPS).state.camDist < 8),
+     mirror.map(p => p.name + ':' + apply(p, realDefaults, OPS).state.camDist).join(', '));
+
+  // DISCRETE PARAMS are compile-time literals baked into the signature. A preset that restores
+  // one must force a NEW program, never silently reuse the cached one.
+  const { signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+  const discreteOp = OPS.findIndex(o => (o.disc || []).length);
+  ok('an operator with a discrete parameter exists', discreteOp >= 0);
+  if(discreteOp >= 0){
+    const di = OPS[discreteOp].disc[0];
+    const mk = v => {
+      const sl = { type: discreteOp, p: OPS[discreteOp].params.map(q => q[4]), o: [0,0,0], r: [0,0,0] };
+      sl.p[di] = v;
+      return signature({ ...realDefaults, stack: [sl], flame: null });
+    };
+    const lim = OPS[discreteOp].params[di];
+    ok('changing a discrete parameter changes the shader signature',
+       mk(lim[1]) !== mk(lim[2]), 'op ' + OPS[discreteOp].name);
+  }
+}
+
 // 12. DOM LINT. getElementById returns the FIRST match, so a duplicated id silently wires every
 //     handler to the wrong element and the visible control does nothing. That is exactly what
 //     happened when the flame panel moved rails and the old copy was left behind: the buttons
@@ -740,6 +807,27 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ].filter(([re]) => re.test(md));
     ok('README carries no superseded explanations', stale.length === 0,
        stale.map(x => x[1]).join('; '));
+  }
+
+  // HULL CONVERGENCE. The box iteration is not monotone when a map rotates: the AABB of a
+  // rotated box inflates by up to |cos|+|sin|, and if that beats the contraction the hull runs
+  // away. The default flame has a -126.5 degree map at scale 0.72 (inflation 1.008) and its hull
+  // reached +/-45 before being clamped to the provable bound.
+  {
+    const base = parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+    const rb = resolveFlameTop(base);
+    ok('the default flame has 8 xforms', rb.length === 8, rb.length + '');
+    const span = Math.max(...[0, 1, 2].map(a => rb.hull.hi[a] - rb.hull.lo[a]));
+    ok('its hull stays bounded despite a rotated map', span < 12, 'span ' + span.toFixed(2));
+    ok('and every map is contractive', rb.every(m => m.scale < 0.999),
+       rb.map(m => m.scale.toFixed(3)).join(','));
+    // the clamp must not disturb flames that were already converging
+    const jc3 = resolveFlameTop(parseFlameTop(readFileSync(
+      new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8')));
+    ok('an axis-aligned flame is unaffected by the clamp',
+       jc3.hull.hi.every(v => Math.abs(v - 1) < 1e-6) &&
+       jc3.hull.lo.every(v => Math.abs(v) < 1e-6));
   }
 
   // the bundled example flames must actually exist at the paths the panel fetches

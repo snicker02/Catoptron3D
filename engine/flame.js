@@ -391,6 +391,14 @@ export function stateHulls(maps, A){
   });
   const R = (c < 0.999) ? (t / (1 - c)) * 1.0001 + 1e-6 : 1e6;
 
+  // The box iteration is NOT monotone when a map rotates: the AABB of a rotated box inflates by
+  // up to |cos|+|sin| per plane, and if that inflation beats the contraction the iteration grows
+  // without bound. A -126.5 degree rotation at scale 0.72 gives 0.72 * 1.40 = 1.008, and the
+  // hull ran away to +/-45 on a flame whose attractor fits inside a radius of 2.4.
+  //
+  // R is a genuine bound on the attractor, so clamping to it every step is both safe and enough:
+  // divergence is capped, and for axis-aligned flames the clamp never binds.
+  const clamp3 = v => v.map(x => Math.max(-R, Math.min(R, x)));
   let lo = maps.map(() => [-R, -R, -R]), hi = maps.map(() => [R, R, R]);
   for(let it = 0; it < 400; it++){
     const nlo = maps.map(() => [1e30, 1e30, 1e30]);
@@ -414,6 +422,8 @@ export function stateHulls(maps, A){
       }
       if(nlo[j][0] > nhi[j][0]){                   // unreachable state: no predecessor at all
         nlo[j] = [0, 0, 0]; nhi[j] = [0, 0, 0];
+      } else {
+        nlo[j] = clamp3(nlo[j]); nhi[j] = clamp3(nhi[j]);
       }
     }
     let done = true;

@@ -656,6 +656,12 @@ on which map was applied last, so `A_j = f_j(union of A_i over i that may preced
 transform gets its OWN bounding box rather than sharing one. The backward walk carries the last
 map it undid and only considers predecessors xaos permits.
 
+The iteration is also **clamped to that bound every step**, because it is NOT monotone when a map
+rotates: the AABB of a rotated box inflates by up to |cos|+|sin| per plane, and if that inflation
+beats the contraction the hull runs away. The default flame has a -126.5 degree map at scale 0.72,
+an inflation of 1.008, and its hull reached +/-45 for an attractor that fits inside a radius of
+2.4. The clamp caps that and never binds on an axis-aligned flame.
+
 Those per-state hulls are found by iterating DOWNWARD from a box that provably contains the
 attractor (radius `t/(1-c)` for contractions bounded by c with translations bounded by t).
 Iterating upward from a seed point is the obvious approach and is wrong in a way that looks fine:
@@ -795,46 +801,54 @@ is a shear rather than a similarity. Flames are carried inside presets.
 
 ## Presets
 
-Four routes out of the tool:
+A preset is a full snapshot of everything that makes an image: the fold stack (operator types,
+every parameter, discrete selections), the IFS settings, camera, lighting, material and bounces,
+palette, step scale, and any imported flame. It carries a `version` integer, and the loader is
+deliberately tolerant — unknown keys are reported and ignored, missing ones come from defaults,
+unresolvable operators are dropped with a warning rather than silently substituted.
 
-- **Named slots** in localStorage — fast, this browser only.
-- **`.json` export / import** — portable and archivable.
-- **`copy` / `paste`** — the preset JSON straight to and from the clipboard.
-- **`copy link`** — the whole look encodes into a URL hash. A real state (59 keys plus a fold
-  stack) comes to about 350 characters, so a look is something you can paste to yourself.
-  Opening a link applies it before the default stack is built.
+**Factory presets** ship in `engine/factory.js`, generated from the former Starters table by
+`tools/gen-factory.mjs`. They are ordinary presets in the ordinary format — same loader, same
+list, same export path — that happen to be read-only. The old Starters buttons are gone: they
+were a stopgap for not having a preset layer, and having a second way to load a look, with its
+own storage and its own UI and no export path, was the actual problem.
 
-**Paste accepts all three shapes** — the JSON, a bare encoded payload, or a full share URL — and
-sniffs which it has rather than demanding one. Someone pasting a preset has no reason to know
-which form they happen to be holding, and refusing two of the three would be a self-inflicted
-failure. A URL is checked first, because its payload is base64url and would otherwise be mistaken
-for a bare one.
+Both regimes are represented, because they need opposite settings:
 
-Both buttons fall back to an inline paste box. That is not just an error path: **Firefox does not
-expose `clipboard.readText` to page scripts at all**, and Safari only grants it inside a gesture,
-so for some browsers the box is the only route. Copy falls back the same way, pre-filled and
-selected, so it is one keystroke away.
+- **Fractal** — IFS contraction around 1.9, camera outside, the stack shrinks space.
+- **Mirror** — contraction 1.0 so space is not shrunk at all, camera INSIDE the shell spacing,
+  primitive translated off the fold axis so the reflections have something to catch. A mirror
+  preset with the camera outside shows a dead box.
 
-The format lives in `engine/preset.js` and is deliberately **pure** — no DOM, no storage, no
-globals — so it is unit-tested headlessly by `tools/test-presets.mjs` (32 tests) rather than only
-being clickable. Two decisions in it are worth knowing:
+**User presets** save, rename, overwrite and delete, persisted to `localStorage` under
+`catoptron3dPresets`, every access wrapped. Slots written under the old `catoptron3d.presets` key
+are migrated on first read, without deleting the original.
 
-**Operators are stored by NAME, not only index.** Index is the fast path, name is the authority.
-The op list has grown every session and will keep growing; the day an op is inserted in the
-middle, every index-only preset silently becomes a different artwork. A name mismatch is
-recoverable and warns; a silent wrong-op is not. Unresolvable slots are dropped rather than
-substituted.
+**Import and export** work at two levels. A single preset is one object; a library is
+`{ v, presets: [...] }`, so a reader can tell them apart without guessing. Library import MERGES
+rather than replaces and asks before overwriting a name. It also accepts a bare array or a single
+preset, because those are things people will have.
 
-**Only non-default values are stored, and loading resets to defaults first.** An omitted key is
-therefore deterministic rather than "whatever happened to be there", which is what makes loading
-two presets in a row reproducible — and what keeps a preset small enough to live in a URL.
+**Keep current camera** loads a preset's geometry without moving you. The camera is the part you
+are most likely to have set by hand, and reloading presets to compare two fold stacks is useless
+if it teleports you each time.
 
-The end-to-end test reads the state literal out of `main.js` rather than a stand-in, captures a
-session, sends it through the URL encoder and back, and asserts the assembled GLSL is
-**byte-identical**. It fails if a state key is added and presets are forgotten.
+### Format
 
-A loaded image is **not** part of a preset: a photo cannot go in a URL, and silently baking one
-into a file would make presets unpredictably large. Reload the image after loading a preset.
+    { v, name, s: { non-default numbers }, f: { flame } | null, k: [ { t, n, p, o, r } ] }
+
+`s` holds only values that differ from the defaults, and `apply` resets to defaults first, so a
+preset is deterministic rather than dependent on what was on screen. Operators are stored by NAME
+as the authority with the index as a fast path, so a preset survives the operator list being
+reordered. The flame records each xform's imported affine PLUS the editor's offsets, so it stays
+re-editable rather than collapsing to a flattened matrix.
+
+Discrete parameters are compile-time literals baked into the shader and part of the program cache
+key, so restoring one forces a genuine recompile — asserted in the tests by checking the signature
+actually changes.
+
+A loaded image is not part of a preset: a photo cannot go in a URL, and silently baking one into
+a file would make presets unpredictably large.
 
 ## Validation
 

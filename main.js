@@ -12,6 +12,7 @@ import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/as
 import { createProgramCache } from './engine/glcache.js';
 import { capture, apply as applyPreset, encode, decode, parseAny,
          PRESET_VERSION } from './engine/preset.js';
+import { FACTORY } from './engine/factory.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
          FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP, xaosIsTrivial } from './engine/flame.js';
@@ -605,20 +606,17 @@ const STARTER_RESET = { tgtX: 0, tgtY: 0, tgtZ: 0, primStyle: 0, primThick: 0.03
                         primRound: 0.06, primAux: 0.35, juliaCx: 0, juliaCy: 0, juliaCz: 0, seamSurf: 0, fresnel: 0.6, metal: 0.0, sun: 0, haze: 0, cityDetail: 0, ambient: 0.30, spec: 0.55,
                         rim: 0.9, sat: 1.0, renderScale: 0.75, trapShift: 0.12 };
 
+// Boot and New both come through here, and so does picking a factory entry from the list — one
+// path, one format. The former Starters table is now engine/factory.js, generated from it by
+// tools/gen-factory.mjs and verified to reproduce every starter exactly.
 function applyStarter(name){
-  const st = STARTERS[name];
-  if(!st) return;
-  Object.assign(state, STARTER_RESET);
-  state.stack = st.stack.map(e => {
-    const sl = newSlot(e.t);
-    e.p.forEach((v, i) => { sl.p[i] = v; });
-    return sl;
-  });
-  Object.assign(state, st.set);
-  renderStack();
-  rebuildGlobals();
+  const p = FACTORY_BY_NAME.get(name);
+  if(!p) return;
+  loadPreset(p);
   const nb = $('presetName');
   if(nb && !nb.value) nb.value = name;
+  const sel = $('presetList');
+  if(sel && [...sel.options].some(o => o.value === 'f:' + name)) sel.value = 'f:' + name;
   pushHistory();
   setStat('loaded \u201c' + name + '\u201d');
 }
@@ -637,10 +635,13 @@ function applyStarter(name){
 // import lands on generic defaults and a perfectly good flame can render as a speck.
 const EXAMPLE_FLAMES = [
   ['Flame IFS base', 'examples/flame-ifs-base.flame', {
-    iters: 10, bounces: 0, reflect: 0.55, ao: 1.0, fog: 0.35,
-    camAzim: -1.434, camElev: -0.565, fov: 1.3,
-    palette: 0, trapScale: 0.55, trapShift: 0.12, exposure: 1.25, renderScale: 0.7
-  }],
+    prim: 7, primSize: 0.6, iters: 12, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
+    tgtX: 0, tgtY: 0, tgtZ: 0,
+    camDist: 1.2, camAzim: 0.388, camElev: 0.275, fov: 1.86,
+    aaExport: 3, normEps: 1.6, steps: 384, stepScale: 0.175, maxDist: 118.5, eps: 0.0002,
+    ao: 1.0, spec: 0.6, rim: 0.7, fog: 0.05, reflect: 0.74, bounces: 4,
+    trapScale: 1.23, selBlend: 0.595, exposure: 1.3, renderScale: 1.5
+  }, { select: 3, op: [0.2] }],
   ['Jerusalem cube (20 xforms)', 'examples/jerusalem-cube.flame', {
     iters: 7, bounces: 1, reflect: 0.35, ao: 1.0, fog: 0.05,
     ambient: 0.30, spec: 0.6, rim: 0.7,
@@ -675,14 +676,14 @@ function autoLoadFlame(){
   if(flameAutoTried || state.flame) return;
   flameAutoTried = true;
   const e = EXAMPLE_FLAMES[0];
-  loadExampleFlame(e[1], e[0], e[2]);
+  loadExampleFlame(e[1], e[0], e[2], e[3]);
 }
 
-async function loadExampleFlame(path, label, settings){
+async function loadExampleFlame(path, label, settings, extra){
   try {
     const r = await fetch('./' + path, { cache: 'no-cache' });
     if(!r.ok) throw new Error('HTTP ' + r.status);
-    loadFlameText(await r.text(), label, settings);
+    loadFlameText(await r.text(), label, settings, extra);
   } catch(e){
     console.error(e);
     setStat('could not load example (' + e.message + ') \u2014 serve the folder over http');
@@ -923,14 +924,20 @@ function ensureFlameOp(){
   renderStack();
 }
 
-function loadFlameText(text, label, settings){
+function loadFlameText(text, label, settings, extra){
   try {
     const f = parseFlame(text);
     flameAutoTried = true;
     state.flame = f;
-    if(f.select === undefined) f.select = 2;   // exact selection by default on import
+    // an example may pin its own selection rule; a bare import still defaults to the exact one
+    f.select = (extra && extra.select !== undefined) ? extra.select : 2;
     ensureFlameOp();
     frameFlame();                              // point the camera at the attractor's own centre
+    if(extra && extra.op){                     // Flame IFS op parameters, e.g. the selection bias
+      const sl = state.stack.find(x => OPS[x.type].name === 'Flame IFS');
+      if(sl) extra.op.forEach((v, i) => { sl.p[i] = v; });
+      renderStack();
+    }
     if(settings) Object.assign(state, settings);
     renderXforms(); renderXaos(); rebuildGlobals(); refreshFlameLabel(); pushHistory();
     if(f.warnings.length){
@@ -1199,10 +1206,27 @@ function wireTopBar(){
      - a URL hash (a look becomes a link)
    The loaded image is NOT part of a preset: a photo cannot go in a URL, and silently baking one
    into a file would make presets unpredictably large. Reload the image after loading a preset. */
-const LS_KEY = 'catoptron3d.presets';
+const LS_KEY = 'catoptron3dPresets';
+const LS_KEY_OLD = 'catoptron3d.presets';        // pre-0.44 slots, migrated on first read
+
+// Factory presets are ordinary presets — same format, same loader, same list — that happen to be
+// read-only. They replace the old Starters buttons, which were a stopgap for not having a preset
+// layer: a second way to load a look, with its own storage, its own UI and no export path.
+const FACTORY_BY_NAME = new Map(FACTORY.map(p => [p.name, p]));
+function isFactory(name){ return FACTORY_BY_NAME.has(name); }
 
 function lsRead(){
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); }
+  try {
+    const cur = localStorage.getItem(LS_KEY);
+    if(cur) return JSON.parse(cur) || {};
+    const old = localStorage.getItem(LS_KEY_OLD);   // one-time migration, never destructive
+    if(old){
+      const parsed = JSON.parse(old) || {};
+      try { localStorage.setItem(LS_KEY, JSON.stringify(parsed)); } catch(e){}
+      return parsed;
+    }
+    return {};
+  }
   catch(e){ return {}; }                       // private mode, quota, corrupt entry — all fine
 }
 function lsWrite(obj){
@@ -1212,8 +1236,14 @@ function lsWrite(obj){
 
 function currentPreset(name){ return capture(state, DEFAULT_STATE, OPS, name); }
 
-function loadPreset(p){
+// KEEP CAMERA lets a geometry preset be viewed from where you already are. The camera is the one
+// part of a preset you are most likely to have already set by hand, and reloading a preset to
+// compare two fold stacks is useless if it also teleports you.
+const CAM_KEYS = ['camDist', 'camAzim', 'camElev', 'fov', 'tgtX', 'tgtY', 'tgtZ'];
+
+function loadPreset(p, keepCamera){
   const r = applyPreset(p, DEFAULT_STATE, OPS);
+  if(keepCamera) CAM_KEYS.forEach(k => { r.state[k] = state[k]; });
   Object.assign(state, r.state);
   state.stack = r.stack;
   state.flame = r.flame || null;
@@ -1234,20 +1264,43 @@ function loadPreset(p){
 function refreshPresetList(){
   const sel = $('presetList');
   if(!sel) return;
+  const keep = sel.value;
   const all = lsRead();
   const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
   sel.innerHTML = '';
-  if(!names.length){
+
+  const grp = (label, items, factory) => {
+    if(!items.length) return;
+    const g = document.createElement('optgroup');
+    g.label = label;
+    items.forEach(n => {
+      const o = document.createElement('option');
+      o.value = (factory ? 'f:' : 'u:') + n;
+      o.textContent = n;
+      g.append(o);
+    });
+    sel.append(g);
+  };
+  grp('Factory', FACTORY.map(p => p.name), true);
+  grp('Saved', names, false);
+  if(!sel.options.length){
     const o = document.createElement('option');
     o.textContent = '(none saved)'; o.value = '';
     sel.append(o);
-    return;
   }
-  names.forEach(n => {
-    const o = document.createElement('option');
-    o.value = n; o.textContent = n;
-    sel.append(o);
-  });
+  if(keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+
+// A list entry is prefixed so a user preset may share a name with a factory one without either
+// shadowing the other.
+function selectedPreset(){
+  const v = ($('presetList') || {}).value || '';
+  if(v.startsWith('f:')) return { name: v.slice(2), preset: FACTORY_BY_NAME.get(v.slice(2)), factory: true };
+  if(v.startsWith('u:')){
+    const n = v.slice(2);
+    return { name: n, preset: lsRead()[n], factory: false };
+  }
+  return { name: '', preset: null, factory: false };
 }
 
 function savePreset(){
@@ -1264,14 +1317,75 @@ function savePreset(){
 }
 
 function deletePreset(){
-  const name = $('presetList').value;
-  if(!name) return;
-  if(!confirm('Delete preset \u201c' + name + '\u201d?')) return;
+  const sel = selectedPreset();
+  if(!sel.name) return;
+  if(sel.factory){ setStat('factory presets cannot be deleted \u2014 save a copy instead'); return; }
+  if(!confirm('Delete preset \u201c' + sel.name + '\u201d?')) return;
   const all = lsRead();
-  delete all[name];
+  delete all[sel.name];
   lsWrite(all);
   refreshPresetList();
-  setStat('deleted \u201c' + name + '\u201d');
+  setStat('deleted \u201c' + sel.name + '\u201d');
+}
+
+function renamePreset(){
+  const sel = selectedPreset();
+  if(!sel.name) return;
+  if(sel.factory){ setStat('factory presets cannot be renamed \u2014 save a copy instead'); return; }
+  const to = (prompt('Rename \u201c' + sel.name + '\u201d to:', sel.name) || '').trim();
+  if(!to || to === sel.name) return;
+  const all = lsRead();
+  if(all[to] && !confirm('Overwrite preset \u201c' + to + '\u201d?')) return;
+  all[to] = { ...all[sel.name], name: to };
+  delete all[sel.name];
+  if(lsWrite(all)){
+    refreshPresetList();
+    $('presetList').value = 'u:' + to;
+    $('presetName').value = to;
+    setStat('renamed to \u201c' + to + '\u201d');
+  }
+}
+
+// LIBRARY export/import. A single preset is one object; a library is { v, presets: [...] }, so a
+// reader can tell them apart without guessing. Import merges rather than replaces, and asks
+// before overwriting a name that already exists.
+function exportLibrary(){
+  const all = lsRead();
+  const presets = Object.keys(all).sort((a, b) => a.localeCompare(b)).map(n => ({ ...all[n], name: n }));
+  if(!presets.length){ setStat('no saved presets to export'); return; }
+  const blob = new Blob([JSON.stringify({ v: PRESET_VERSION, presets }, null, 1)],
+                        { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'catoptron3d-presets.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  setStat('exported ' + presets.length + ' preset' + (presets.length > 1 ? 's' : ''));
+}
+
+function importLibraryText(text){
+  let obj;
+  try { obj = JSON.parse(text); }
+  catch(e){ setStat('that file is not valid JSON'); return; }
+
+  // accept a library, a bare array, or a single preset — all three are things someone may have
+  const list = Array.isArray(obj) ? obj
+             : (obj && Array.isArray(obj.presets)) ? obj.presets
+             : (obj && obj.k) ? [obj] : null;
+  if(!list || !list.length){ setStat('no presets found in that file'); return; }
+
+  const all = lsRead();
+  let added = 0, skipped = 0;
+  list.forEach((p, i) => {
+    const nm = (p && p.name ? String(p.name) : 'imported ' + (i + 1)).trim();
+    if(!p || !p.k){ skipped++; return; }
+    if(all[nm] && !confirm('Overwrite preset \u201c' + nm + '\u201d?')){ skipped++; return; }
+    all[nm] = { ...p, name: nm };
+    added++;
+  });
+  if(added && lsWrite(all)) refreshPresetList();
+  setStat('imported ' + added + (skipped ? ', skipped ' + skipped : ''));
 }
 
 function exportPreset(){
@@ -1701,7 +1815,7 @@ function buildPanel(){
   });
   $('flameLoadEx').onclick = () => {
     const e = EXAMPLE_FLAMES[parseInt(exSel.value, 10) || 0];
-    if(e) loadExampleFlame(e[1], e[0], e[2]);
+    if(e) loadExampleFlame(e[1], e[0], e[2], e[3]);
   };
   $('flameFile').addEventListener('change', e => {
     const f = e.target.files[0];
@@ -1716,12 +1830,27 @@ function buildPanel(){
 
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {
-    const n = $('presetList').value;
-    if(!n) return;
-    const all = lsRead();
-    if(all[n]){ loadPreset(all[n]); $('presetName').value = n; pushHistory(); }
+    const sel = selectedPreset();
+    if(!sel.preset) return;
+    loadPreset(sel.preset, $('keepCam') && $('keepCam').checked);
+    $('presetName').value = sel.name;
+    pushHistory();
+    setStat('loaded \u201c' + sel.name + '\u201d');
   };
+  $('presetList').ondblclick = () => $('presetLoad').click();
+  $('presetRename').onclick = renamePreset;
   $('presetDelete').onclick = deletePreset;
+  $('libExport').onclick    = exportLibrary;
+  $('libImport').onclick    = () => $('libFile').click();
+  $('libFile').onchange     = e => {
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = () => importLibraryText(String(rd.result || ''));
+    rd.onerror = () => setStat('could not read that file');
+    rd.readAsText(f);
+    e.target.value = '';
+  };
   $('presetExport').onclick = exportPreset;
   $('presetImport').onclick = () => $('presetFile').click();
   $('presetFile').addEventListener('change', e => importPresetFile(e.target.files[0]));
@@ -1732,13 +1861,6 @@ function buildPanel(){
   $('pasteCancel').onclick  = hidePasteBox;
   refreshPresetList();
 
-  const starters = $('starters');
-  Object.keys(STARTERS).forEach(k => {
-    const b = document.createElement('button');
-    b.textContent = k;
-    b.onclick = () => applyStarter(k);
-    starters.append(b);
-  });
   const addSel = $('addOp');
   OPS.forEach((op, i) => {
     const o = document.createElement('option');
