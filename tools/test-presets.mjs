@@ -878,6 +878,34 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('the disclosure arrow is styled', /details\.notewrap>summary::before/.test(html3));
   }
 
+  // IMAGE AMBIGUITY. The pairwise box count measures AABBs, which inflate around a rotated image
+  // and overstate the problem. What decides whether ANY selection rule can be exact is whether the
+  // images themselves overlap — p is in image i exactly when f_i^-1(p) is in the hull.
+  //
+  // This was checked before building oriented bounding boxes, and it is why they were NOT built:
+  // exact image containment moved ambiguity only 23.5% -> 21.2% on the flame that motivated them,
+  // so AABB inflation was not the cause. The overlap is genuine.
+  {
+    for(const [nm, want] of [['jerusalem-cube', 0], ['vicsek-cross', 0], ['corner-shell', 0]]){
+      const r = resolveFlame(parseFlameTop(readFileSync(
+        new URL('../examples/' + nm + '.flame', import.meta.url), 'utf8')));
+      ok(nm + ' has disjoint images', r.ambiguity < 0.01,
+         (100 * r.ambiguity).toFixed(1) + '%');
+    }
+    const fb = resolveFlame(parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8')));
+    ok('the rotated default flame has genuinely overlapping images', fb.ambiguity > 0.2,
+       (100 * fb.ambiguity).toFixed(1) + '%');
+    ok('ambiguity is a fraction', fb.ambiguity >= 0 && fb.ambiguity <= 1);
+    // deterministic: the same flame must not report a different figure each call
+    const { invalidateFlameCache: inv2 } =
+      await import(new URL('../engine/flame.js', import.meta.url).href);
+    inv2();
+    const a1 = resolveFlame(parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'))).ambiguity;
+    ok('and it is deterministic', Math.abs(a1 - fb.ambiguity) < 1e-12);
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
@@ -1127,6 +1155,14 @@ console.log('preset format v' + PRESET_VERSION + '\n');
       !NO_WIDGET.has(k) && !groups.includes("'" + k + "'") &&
       !builders.includes('state.' + k + ' ='));
     ok('every tunable state key has a control', missing.length === 0, missing.join(', '));
+
+    // ...and the flame tab's controls specifically. A slice from one marker to another removed
+    // ten widgets at once while leaving the file valid; the key check above caught it, but naming
+    // the controls says WHICH went missing instead of listing orphaned state.
+    const FLAME_CONTROLS = ['Map selection', 'Search width', 'Crop box', 'Render mode',
+                            'Iterations', 'Primitive size'];
+    const gone = FLAME_CONTROLS.filter(c => !js.includes("'" + c + "'"));
+    ok('the flame tab still builds all of its controls', gone.length === 0, gone.join(', '));
 
     // ...and the converse: every state.<key> the renderer UPLOADS must EXIST in state. A missing
     // one is uploaded as undefined, which silently becomes 0 or NaN in the shader. Two shipped

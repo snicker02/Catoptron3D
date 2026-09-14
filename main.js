@@ -1816,33 +1816,9 @@ function buildGlobals(){
         + 'Var amount away from zero, drop Iterations, or set a Scale ceiling in Quality.';
       fg.append(ps);
     }
-    const ov = rf.boxOverlap;
-    if(ov && ov.pairs){
-      const ex = document.createElement('p');
-      ex.className = 'note';
-      if(ov.exact){
-        ex.textContent = 'Image boxes are disjoint (' + ov.pairs + ' pairs checked), so '
-          + '\u201cimage box\u201d is the exact rule for this flame.';
-      } else {
-        ex.style.color = 'var(--warn1)';
-        ex.textContent = ov.overlapping + ' of ' + ov.pairs + ' image-box pairs OVERLAP \u2014 '
-          + 'usually because a transform rotates, which makes its axis-aligned box much larger '
-          + 'than its actual image. Two consequences. \u201cImage box\u201d is not exact here: '
-          + 'inside an overlap the choice is arbitrary. And the estimate draws the CONTAINER '
-          + 'rather than the attractor until enough levels have shrunk it \u2014 which is what '
-          + 'large flat planes and staircase edges are. RAISE ITERATIONS: measured on one such '
-          + 'flame, flat-plane area fell from 74% at 7 iterations to 11% at 15.';
-        if(state.iters < 12){
-          const it = document.createElement('p');
-          it.className = 'note';
-          it.style.color = 'var(--warn1)';
-          it.textContent = 'Iterations is ' + state.iters + '. For a flame with overlapping '
-            + 'image boxes that is likely too few, and the flat planes you see are the container.';
-          fg.append(it);
-        }
-      }
-      fg.append(ex);
-    }
+    // Search width, render mode and the crop box were lost when the ambiguity message replaced
+    // the old box-overlap block: the slice ran from one marker to another and took the controls
+    // sitting between them with it. The control lint caught all ten keys.
     if(!state.flameVoxel){
       fg.append(mkSelect('Search width',
                          ['1 \u2014 greedy, fast', '2 \u2014 4.5\u00d7 slower', '4 \u2014 30\u00d7 slower'],
@@ -1850,21 +1826,18 @@ function buildGlobals(){
                          v => { state.flameBeam = [1,2,4][v]; }, true));
       const bn = document.createElement('p');
       bn.className = 'note';
-      bn.textContent = 'The walk normally commits to ONE branch per level, and when the image '
-        + 'boxes overlap that commitment is a guess. A wrong guess returns an estimate that is '
-        + 'too large, the marcher steps past the surface, and the detail is simply missing. '
-        + 'Following several branches and taking the smallest estimate recovers it: against a '
+      bn.textContent = 'The walk normally commits to ONE branch per level. Where the images '
+        + 'genuinely overlap that commitment is a guess, and a wrong guess returns an estimate '
+        + 'that is too large: the marcher steps past the surface and the detail is missing. '
+        + 'Following several branches and taking the smallest recovers it \u2014 against a '
         + '22.8-million-point ground truth at 20 iterations, cells wrongly reported empty fell '
-        + 'from 313 to 81 at width 2 and to 9 at width 4. Rendered coverage went 89% to 93% to '
-        + '94%. It is expensive \u2014 use width 1 to navigate and raise it for the save.';
+        + 'from 313 to 81 at width 2 and to 9 at width 4. This is THE lever for a flame whose '
+        + 'ambiguity is above zero. Use width 1 to navigate and raise it for the save.';
       fg.append(bn);
     }
     fg.append(mkSelect('Crop box', ['off', 'on'], state.crop ? 1 : 0,
                        v => { state.crop = v; rebuildGlobals(); }, true));
     if(state.crop){
-      // written out rather than looped: the control lint looks for a literal `state.key =`, and a
-      // loop assigning through state[k] would slip past it. Six lines is a fair price for a lint
-      // that has caught three missing widgets.
       fg.append(mkSlider('Crop centre X', -4, 4, 0.01, state.cropCx, v => { state.cropCx = v; }, 2));
       fg.append(mkSlider('Crop centre Y', -4, 4, 0.01, state.cropCy, v => { state.cropCy = v; }, 2));
       fg.append(mkSlider('Crop centre Z', -4, 4, 0.01, state.cropCz, v => { state.cropCz = v; }, 2));
@@ -1875,8 +1848,7 @@ function buildGlobals(){
       cn.className = 'note';
       cn.textContent = 'Intersects the attractor with a box: the maximum of two distance '
         + 'functions, applied once where every path sees it, so the shadow and the reflections '
-        + 'are of the CROPPED object rather than the whole one. Useful for cutting a section out '
-        + 'of a structure that is more interesting inside than from outside.';
+        + 'are of the CROPPED object rather than the whole one.';
       fg.append(cn);
     }
     fg.append(mkSelect('Render mode', ['distance estimator', 'voxel field (exact, capped)'],
@@ -1891,10 +1863,29 @@ function buildGlobals(){
       vn.className = 'note';
       vn.textContent = 'The attractor is built by CHAOS GAME and distance-transformed, so there '
         + 'is no estimator to guess with: no containers, no phantom surface, no terraces. The '
-        + 'cost is a hard detail ceiling at one voxel and a rebuild whenever a transform changes '
-        + '(about 0.5 s at 128\u00b3, several seconds at 256\u00b3). Close in, the grid itself '
-        + 'becomes visible \u2014 that is the trade, not a bug.';
+        + 'cost is a hard detail ceiling at one voxel and a rebuild whenever a transform changes.';
       fg.append(vn);
+    }
+    const ov = rf.boxOverlap;
+    if(ov && ov.pairs){
+      const amb = rf.ambiguity || 0;
+      const ex = document.createElement('p');
+      ex.className = 'note';
+      if(amb < 0.005){
+        ex.textContent = 'The transforms\u2019 images are DISJOINT (' + ov.pairs + ' pairs '
+          + 'checked, ambiguity ' + (100 * amb).toFixed(1) + '%), so a point has exactly one '
+          + 'preimage and \u201cimage box\u201d is the exact rule here. This is the well-behaved '
+          + 'case; artifacts in it are settings, not the flame.';
+      } else {
+        ex.style.color = 'var(--warn1)';
+        ex.textContent = 'OVERLAPPING IMAGES: ' + (100 * amb).toFixed(0) + '% of the attractor is '
+          + 'covered by more than one transform, so a point there genuinely HAS several valid '
+          + 'preimages and NO selection rule can be exact \u2014 this is a property of the flame, '
+          + 'not a setting. A tighter container does not help; it was measured. The only correct '
+          + 'estimate is the smallest over branches, which is what SEARCH WIDTH approximates, so '
+          + 'that is the lever. Bundled flames read 0%; ones that render badly read 20 to 38%.';
+      }
+      fg.append(ex);
     }
     const sm = document.createElement('p');
     sm.className = 'note';

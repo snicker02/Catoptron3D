@@ -433,37 +433,44 @@ WORSE: coverage rose from 73% to 90% and boxy slabs appeared, because a boxier c
 boxier geometry. Reverted. That is the fourth time in this project a metric and a picture have
 disagreed and the picture has been right.
 
-### "Image box" is exact only while the boxes are DISJOINT
+### Overlapping images, and why oriented boxes were not built
 
-The rule is exact for an affine IFS because the image of the hull under an axis-aligned map is a
-box. **Rotate a transform and that stops being true**: the image is no longer axis-aligned, so its
-AABB is much larger than the image itself, and with enough rotation every box overlaps every
-other. Inside an overlap the rule has nothing to discriminate on and the choice is arbitrary —
-which paints phantom surface, and terraces across it.
+"Image box" is exact only while the transforms' images are disjoint. The obvious next step was a
+tighter container — oriented boxes instead of axis-aligned ones — since a rotated image's AABB is
+much larger than the image and that inflation looked like the cause of the overlap.
 
-A reported flame had **all 10 image-box pairs overlapping** from a single 131/-91 degree
-transform. Measured against a 400,000-point chaos-game ground truth, agreement was 91.0% with 534
-phantom cells: about a third of the drawn surface was false. Switching selection rules did not fix
-it — the four rules produced visibly DIFFERENT objects rather than cleaner versions of one, which
-is exactly what an arbitrary choice inside an overlap looks like.
+**It was measured first, and the premise was wrong.**
 
-The flame layer now reports this, and the panel says which case a flame is in. That matters
-because the selector calls the rule "exact for affine" and for a rotated flame it simply is not.
+A PCA-oriented box is often LARGER than the axis-aligned one: 2.3x on the Jerusalem cube, 2.0x on
+corner-shell, 1.3x on the flame that prompted the idea. For a roughly cubic attractor the
+covariance is degenerate, PCA picks an arbitrary frame, and a rotated box around a cube is bigger.
 
-Three alternative rules were tried on that flame and none shipped:
+More decisively, the EXACT containment test — `p` is in image `i` exactly when `f_i^-1(p)` is in
+the hull, with no AABB anywhere — barely moves the ambiguity: **23.5% to 21.2%** on one flame,
+**33.9% to 32.7%** on another. So AABB inflation was not the source.
 
-| rule | agreement | missed | phantom |
-|---|---|---|---|
-| image box (AABB) | **91.0%** | 189 | 534 |
-| exact inverse test — `f_i^-1(p)` in hull, exact for ANY affine map | 91.1% | 176 | 538 |
-| bounding sphere — exact for similarities, rotation-invariant | 88.0% | 815 | 149 |
-| nearest image | 89.8% | 747 | 68 |
+The images genuinely overlap. Sampling the hull and counting how much of it more than one
+transform claims:
 
-The inverse test is theoretically the right one and gained 0.1%, which is noise; the limit is not
-the box test but the HULL, which is a loose container for a rotated attractor. The sphere is
-rotation-invariant and exact under a similarity, and still lost, because for this attractor the
-sphere encloses 106 volume units against the AABB's 29. A tighter container is the real fix and
-none of these is one.
+| flame | ambiguous volume |
+|---|---|
+| jerusalem-cube | **0.0%** |
+| vicsek-cross | **0.0%** |
+| corner-shell | **0.0%** |
+| flame-ifs-base (rotated) | **37.8%** |
+| a reported spherical3D flame | 19.5% |
+
+Either a flame's images are disjoint or they are not, and that is a property of the ARTWORK. Where
+they overlap, a point genuinely has several valid preimages and no selection rule can be exact. No
+container fixes that. The only correct estimate is the smallest over branches, which is exactly
+what **Search width** approximates — so the lever already exists, and exhaustive search is
+`maps^iterations` and intractable.
+
+The Flame panel reports this figure, because it is the difference between an artifact that is a
+setting and one that is the flame. `tools/image-overlap.py` measures it outside the app.
+
+The earlier pairwise box count is kept but it measures AABBs, so it overstates the problem; the
+ambiguity figure is the one to read.
 
 ### Blending the two selection rules
 

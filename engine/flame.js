@@ -625,6 +625,44 @@ export function resolveFlame(flame){
       }
     }
     out.boxOverlap = { pairs, overlapping, exact: overlapping === 0 };
+
+    // AMBIGUITY. The box count above measures the AABBs, which inflate around a rotated image and
+    // so overstate the problem. What actually decides whether any selection rule can be exact is
+    // whether the IMAGES themselves overlap, and that is a different question:
+    //
+    //   p is in image i   <=>   f_i^-1(p) is in the hull       (exact for any affine map)
+    //
+    // Measured across the hull, the bundled flames come out at 0.0% and the ones that render
+    // badly at 21-36%. A tighter container cannot help the second group: a point there genuinely
+    // HAS several valid preimages, and the only correct estimate is the minimum over branches,
+    // which is what Search width approximates. Knowing which case a flame is in is the difference
+    // between a fixable setting and a property of the artwork.
+    {
+      let seed = 0x1a2b3c4d;
+      const rnd = () => { seed ^= seed << 13; seed |= 0; seed ^= seed >>> 17;
+                          seed ^= seed << 5; seed |= 0; return (seed >>> 0) / 4294967296; };
+      const N = 3000;
+      let covered = 0, multi = 0;
+      const span = [0, 1, 2].map(a => hi[a] - lo[a]);
+      for(let s2 = 0; s2 < N; s2++){
+        const p = [lo[0] + rnd() * span[0], lo[1] + rnd() * span[1], lo[2] + rnd() * span[2]];
+        let hits = 0;
+        for(let i = 0; i < out.length; i++){
+          const m = out[i], a = Math.abs(m.vamt) < 1e-5 ? 1e-5 : m.vamt;
+          const u = [p[0] / a, p[1] / a, p[2] / a];
+          const q = [m.Mi[0]*u[0] + m.Mi[1]*u[1] + m.Mi[2]*u[2] + m.Ti[0],
+                     m.Mi[3]*u[0] + m.Mi[4]*u[1] + m.Mi[5]*u[2] + m.Ti[1],
+                     m.Mi[6]*u[0] + m.Mi[7]*u[1] + m.Mi[8]*u[2] + m.Ti[2]];
+          let inside = true;
+          for(let a2 = 0; a2 < 3; a2++) if(q[a2] < lo[a2] || q[a2] > hi[a2]){ inside = false; break; }
+          if(inside) hits++;
+          if(hits > 1) break;
+        }
+        if(hits >= 1) covered++;
+        if(hits > 1) multi++;
+      }
+      out.ambiguity = covered ? multi / covered : 0;
+    }
   }
   memoKey = key; memoVal = out;
   return out;
