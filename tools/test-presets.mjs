@@ -755,6 +755,53 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('the watchdog is cancelled on success', /clearTimeout\(watchdog\)/.test(sp));
   }
 
+  // NON-AFFINE FLAMES. resolveXform builds each map's matrix from the AFFINE part only, so a
+  // transform carrying a variation is described by a matrix that is not the map being rendered.
+  // The hull, the image boxes and every containment test come off those matrices. With `exp` at
+  // amount 0.015 the affine part is tiny and the hull collapsed to 0.003 units across while the
+  // real attractor spanned 0.028 — no container, and the render was a wash of false surface.
+  {
+    const { applyVariation, isAffine } = await import(new URL('../engine/varfwd.js', import.meta.url).href);
+    const X = o => ({ M: [1,0,0,0,1,0,0,0,1], T: [0,0,0], scale: 1, rot: [0,0,0], tr: [0,0,0],
+                      vari: 0, vamt: 1, vp: [0.8,2,0,0,0,0,0,0,1,0,0,0],
+                      chaos: null, on: true, weight: 1, ...o });
+    const expFlame = { name: 'x', select: 2, maps: [
+      X({ T: [-1,-1,0], scale: 0.25, rot: [-72,67.5,-10], vari: 4, vamt: 0.015,
+          vp: [0.8,0.425,0,0,0,0,0,0,1,0,0,0], weight: 0.5 }),
+      X({ M: [0.5,0,0,0,0.5,0,0,0,0.5], vari: 0, vamt: -1.23, weight: 1 }) ] };
+    const rr = resolveFlame(expFlame);
+    ok('a flame with a variation is reported as non-affine', rr.affine === false);
+    const span = Math.max(...[0,1,2].map(a => rr.hull.hi[a] - rr.hull.lo[a]));
+    ok('and its hull is measured, not collapsed', span > 0.01, 'span ' + span.toFixed(4));
+
+    // the sampled hull must actually contain the attractor it measured
+    let seed = 7, inside = 0, total = 0;
+    const rnd = () => { seed ^= seed << 13; seed |= 0; seed ^= seed >>> 17;
+                        seed ^= seed << 5; seed |= 0; return (seed >>> 0) / 4294967296; };
+    let pt = [0,0,0];
+    for(let i = 0; i < 4000; i++){
+      const m = rr[(rnd() * rr.length) | 0];
+      const a = m.Aff, t = m.Taf;
+      const q = [a[0]*pt[0]+a[1]*pt[1]+a[2]*pt[2]+t[0],
+                 a[3]*pt[0]+a[4]*pt[1]+a[5]*pt[2]+t[1],
+                 a[6]*pt[0]+a[7]*pt[1]+a[8]*pt[2]+t[2]];
+      pt = applyVariation(m.vari | 0, q, m.vamt, m.vp);
+      if(!pt.every(Number.isFinite)){ pt = [0,0,0]; continue; }
+      if(i < 100) continue;
+      total++;
+      if([0,1,2].every(a2 => pt[a2] >= rr.hull.lo[a2] && pt[a2] <= rr.hull.hi[a2])) inside++;
+    }
+    ok('the measured hull contains the attractor it measured',
+       total > 0 && inside / total > 0.995, (100 * inside / Math.max(total,1)).toFixed(1) + '%');
+
+    // affine flames must be untouched: the fixed point is exact for them and cheaper
+    const jc4 = resolveFlame(parseFlameTop(readFileSync(
+      new URL('../examples/jerusalem-cube.flame', import.meta.url), 'utf8')));
+    ok('an affine flame still uses the exact fixed point', jc4.affine === true);
+    ok('and its hull is unchanged', jc4.hull.hi.every(v => Math.abs(v - 1) < 1e-6));
+    ok('isAffine keys off the variation', isAffine({ vari: 0 }) && !isAffine({ vari: 4 }));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

@@ -93,6 +93,7 @@ export function normalizeCfg(cfg){
     transp:   !!cfg.transp,
     aa:       Math.max(1, Math.min(4, cfg.aa | 0 || 1)),
     voxel:    !!cfg.voxel,
+    bestDepth: !!cfg.bestDepth,
     // Beam width for the flame walk. Only meaningful for a stack that is exactly one Flame IFS
     // op, because a beam has to carry its branches ACROSS iterations and the general fold stack
     // interleaves other operators between them.
@@ -122,7 +123,8 @@ export function signature(cfg){
   }).join(',');
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
-          c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.voxel ? 1 : 0, c.flameBeam, c.bounces,
+          c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.voxel ? 1 : 0, c.bestDepth ? 1 : 0,
+          c.flameBeam, c.bounces,
           c.flameN, c.flameSelect, (c.flameVars || []).join(''),
           (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
@@ -530,6 +532,15 @@ float mapT(vec3 p, out vec4 trap, out float safe){
   float s = 1.0;
   float seam = 1e9;
   trap = vec4(1e9);
+${cfg.bestDepth ? `  // BEST DEPTH. prim(q_n) / s_n is a valid lower bound at EVERY depth, not only the last one,
+  // so the tightest of them is the one to use — and taking the maximum can only ever help.
+  //
+  // It matters when s explodes. A variation whose inverse has a large Lipschitz factor drives it
+  // hard: exp at amount 0.015 contributes at least 1/0.015 = 67 per iteration and up to 1e6 near
+  // the origin, so after eight passes s is around 1e25 and prim(q)/s is zero for every point in
+  // the frame. Every pixel then reads as a hit and the image is a wash of false surface. The
+  // early depths have small s and are not crushed, so the maximum stays meaningful.
+  float dbest = -1e30;` : ''}
   for(int i = 0; i < ${cfg.iters}; i++){
 ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to infinity in a few passes and the
     // estimate is garbage; with it the orbit freezes at the escape point, which is what the
@@ -537,8 +548,9 @@ ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to inf
     if(dot(p, p) > uBailout * uBailout) break;
 ` : ''}${folds}
     trap = min(trap, vec4(abs(p), dot(p, p)));${contraction}
+${cfg.bestDepth ? `    dbest = max(dbest, prim(p) / s);` : ''}
   }
-  float d = prim(p) / s;
+${cfg.bestDepth ? `  float d = max(dbest, prim(p) / s);` : `  float d = prim(p) / s;`}
   // The seam bounds how far the marcher may ADVANCE, but it is not a surface — unless you ask
   // for it. Fold membrane mode returns the clamped value as the distance, so the marcher lands
   // on the cut plane and shades it as a visible sheet. That is the accidental look this bug

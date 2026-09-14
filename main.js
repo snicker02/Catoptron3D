@@ -49,7 +49,8 @@ const state = {
   ifsCx: 1.0, ifsCy: 1.0, ifsCz: 1.0,
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
-  aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1, normEps: 1.0,
+  aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
+  bestDepth: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -202,6 +203,7 @@ function currentCfg(){
     flameXaos: resolveFlame(state.flame).xaos || null,
     voxel: !!(state.flameVoxel && state.flame && voxField),
     flameBeam: state.flameBeam,
+    bestDepth: !!state.bestDepth,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -474,7 +476,8 @@ const STARTERS = {
     stack: [{ t: 8, p: [0.42] }, { t: 5, p: [1.0] }],
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
-           aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1, normEps: 1.0,
+           aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
+  bestDepth: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1753,7 +1756,21 @@ function buildGlobals(){
     // Say plainly whether the exact rule applies to THIS flame. It is exact only while the image
     // boxes are disjoint; a rotated map's AABB is far bigger than its image, and once the boxes
     // overlap the choice inside the overlap is arbitrary — phantom surface, and terracing on it.
-    const ov = resolveFlame(state.flame).boxOverlap;
+    const rf = resolveFlame(state.flame);
+    if(rf.affine === false){
+      const na = document.createElement('p');
+      na.className = 'note';
+      na.style.color = 'var(--warn1)';
+      na.textContent = 'This flame uses a VARIATION, so its transforms are not affine. The hull '
+        + 'and image boxes are measured by chaos game rather than derived from the matrices \u2014 '
+        + 'they used to be built from the affine part alone, which ignored the variation entirely '
+        + 'and could collapse the hull to a point. Attractor span is '
+        + (Math.max(rf.hull.hi[0] - rf.hull.lo[0], rf.hull.hi[1] - rf.hull.lo[1],
+                    rf.hull.hi[2] - rf.hull.lo[2])).toFixed(4) + ' units; if that is far from '
+        + 'your camera distance, press New\u2019s framing or set Camera distance to match.';
+      fg.append(na);
+    }
+    const ov = rf.boxOverlap;
     if(ov && ov.pairs){
       const ex = document.createElement('p');
       ex.className = 'note';
@@ -1933,6 +1950,16 @@ function buildGlobals(){
       // Anti-aliasing is compile-time, so this is a select with the 'baked' tag rather than a
       // slider: picking a new count swaps the program. It applies to SAVES and quick renders,
       // never to the live viewport — 4x or 9x per frame while orbiting would be unusable.
+      g.append(mkSelect('Estimate depth', ['final only', 'best of all depths'],
+                        state.bestDepth ? 1 : 0, v => { state.bestDepth = v; }, true));
+      const bd = document.createElement('p');
+      bd.className = 'note';
+      bd.textContent = 'prim(q)/s is a valid bound at EVERY depth, not only the last, so the '
+        + 'largest of them is the tightest. It costs one primitive evaluation per iteration and '
+        + 'helps when the accumulated scale runs away \u2014 a variation whose inverse has a big '
+        + 'Lipschitz factor can drive s past 1e20, at which point the final-depth estimate is '
+        + 'zero everywhere and the frame fills with false surface.';
+      g.append(bd);
       g.append(mkSelect('Refine when still', ['off', 'on'], state.idleRefine ? 1 : 0,
                         v => { state.idleRefine = v; refined = false; }, false));
       const rn = document.createElement('p');

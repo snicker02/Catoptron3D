@@ -220,6 +220,42 @@ hashed identically, and edits between them were invisible. A soak of 400 random 
 stale results. Hashing the float's BITS through an `Int32Array` view catches none in 600, and the
 test suite runs that soak with integer-valued edits deliberately included.
 
+### The containers ignored the variations
+
+The estimator only ever needed each variation's INVERSE, so nothing on the CPU knew what a
+transform actually did — `resolveXform` built every map's matrix from the **affine part alone**.
+
+That is fine for linear3D and wrong for the other twenty-two. The hull, the per-map image boxes
+and every containment test come off those matrices. On a reported flame using `exp` at amount
+0.015, the affine part is tiny while the real image is not: **the hull collapsed to a box 0.003
+units across for an attractor spanning 0.028**, so there was no container worth the name and the
+frame filled with false surface.
+
+`engine/varfwd.js` now implements the FORWARD map of all 23 variations, and a flame carrying any
+of them has its hull and boxes **measured by chaos game** instead of derived. Affine flames keep
+the exact corner fixed point, which is cheaper and exact for them — verified unchanged.
+
+The forwards are checked by round trip against the shader's own inverses, not by reading them:
+`tools/varfwd-probe.mjs` extracts each inverse from the assembled GLSL, runs it on the GPU over a
+point grid, and the suite applies the JS forward to the result and requires `V(V^-1(q)) = q`.
+That caught four wrong on the first pass — `unpolar`, `polar`, `zscale` and `zcone`, where I had
+guessed the formula from the name. All 23 now agree to float32 precision.
+
+### When the accumulated scale runs away
+
+A separate problem on the same flame, and one that is NOT fixed. `exp` at amount 0.015 has an
+inverse whose Lipschitz factor is `max(1/r, 1/|A|)` — at least 67 per iteration and up to 1e6 near
+the origin. After eight passes `s` is around 1e25, and `prim(q)/s` is zero for every point in the
+frame, so everything reads as a hit.
+
+**Estimate depth** (Quality) offers the tightest bound over all depths rather than the last one,
+since `prim(q_n)/s_n` is valid at every n and the early ones are not crushed. It is sound and it
+costs one primitive evaluation per iteration — but on the flame that motivated it, it did not
+recover the image, so it is off by default and offered rather than recommended.
+
+For a flame like that the practical levers are a variation amount further from zero, and framing
+the camera to the attractor's actual span, which the panel now reports.
+
 ### Search width: stop the walk guessing
 
 The default walk commits to ONE branch per level. When the image boxes overlap that commitment is

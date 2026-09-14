@@ -1,3 +1,4 @@
+import { forwardMap, isAffine } from './varfwd.js';
 // JWildfire / Apophysis .flame reader — the linear (pure affine) subset.
 //
 // WHY ONLY LINEAR: a flame renders by CHAOS GAME — iterate a point forward under randomly
@@ -342,6 +343,9 @@ export function resolveXform(x){
     fp: Ai ? apply(Ai, T) : [0, 0, 0],
     scale: opNorm(M),
     expand: opNorm(Mi),
+    Aff, Taf,                                      // affine WITHOUT the amount: the variation
+                                                   // applies that, so the forward map needs both
+                                                   // halves separately
     base: x.T,                                     // the file's own translation, for the panel
     chaos: x.chaos ? x.chaos.slice() : null,       // xaos row, needed to build the adjacency
     vari: Math.max(0, Math.min(FLAME_VARIATIONS.length - 1, x.vari | 0)),
@@ -375,6 +379,50 @@ export function xaosIsTrivial(A){
 // PER-STATE hulls. With xaos this is a graph-directed IFS: the set a point occupies depends on
 // which map was applied last. A_j = f_j( union of A_i over i that may precede j ), so each xform
 // gets its own bounding box and they are NOT simply f_j(global hull).
+// SAMPLED hull, for flames whose transforms are not affine.
+//
+// The corner iteration below assumes each map sends a box to a box, which is only true of an
+// affine map. Put `exp` at amount 0.015 on a transform and the affine part is tiny while the real
+// image is not: the hull collapsed to a box 0.003 units across, the containers stopped containing
+// anything, and the render became a wash of noise.
+//
+// So when any transform carries a variation, the hull is MEASURED instead — run the chaos game
+// with the true forward maps and take the extent of what comes out. Slower than the fixed point
+// and correct for maps the fixed point cannot describe.
+export function sampledHulls(maps, A, fwd, samples = 24000){
+  const n = maps.length;
+  let seed = 0x2545f491;
+  const rnd = () => { seed ^= seed << 13; seed |= 0; seed ^= seed >>> 17;
+                      seed ^= seed << 5; seed |= 0; return (seed >>> 0) / 4294967296; };
+  const lo = maps.map(() => [1e30, 1e30, 1e30]);
+  const hi = maps.map(() => [-1e30, -1e30, -1e30]);
+  const gl = [1e30, 1e30, 1e30], gh = [-1e30, -1e30, -1e30];
+  let p = [0, 0, 0], prev = -1;
+  for(let i = 0; i < samples; i++){
+    // respect xaos: only maps the grammar allows may follow the last one
+    let k = (rnd() * n) | 0;
+    for(let t = 0; t < n && prev >= 0 && !A[prev][k]; t++) k = (k + 1) % n;
+    const q = fwd(maps[k], p);
+    if(!isFinite(q[0]) || !isFinite(q[1]) || !isFinite(q[2])){ p = [0, 0, 0]; prev = -1; continue; }
+    p = q; prev = k;
+    if(i < 60) continue;                       // burn-in
+    for(let a = 0; a < 3; a++){
+      if(p[a] < lo[k][a]) lo[k][a] = p[a];
+      if(p[a] > hi[k][a]) hi[k][a] = p[a];
+      if(p[a] < gl[a]) gl[a] = p[a];
+      if(p[a] > gh[a]) gh[a] = p[a];
+    }
+  }
+  for(let j = 0; j < n; j++){
+    if(lo[j][0] > hi[j][0]){ lo[j] = [0, 0, 0]; hi[j] = [0, 0, 0]; continue; }
+    for(let a = 0; a < 3; a++){
+      const pad = Math.max((hi[j][a] - lo[j][a]) * 0.02, 1e-4);
+      lo[j][a] -= pad; hi[j][a] += pad;
+    }
+  }
+  return { lo, hi, glo: gl, ghi: gh };
+}
+
 export function stateHulls(maps, A){
   const n = maps.length;
 
@@ -538,11 +586,24 @@ export function resolveFlame(flame){
   });
   if(out.length){
     const A = xaosMatrix(out);
-    const sh = stateHulls(out, A);
+    // The corner fixed point is only valid when every map is affine. A variation makes the map
+    // non-affine, and the hull it produces then describes a transform nobody is rendering.
+    const affine = out.every(isAffine);
+    let sh, lo, hi;
+    if(affine){
+      sh = stateHulls(out, A);
+      lo = [0, 1, 2].map(r => Math.min(...sh.lo.map(v => v[r])));
+      hi = [0, 1, 2].map(r => Math.max(...sh.hi.map(v => v[r])));
+    } else {
+      sh = sampledHulls(out, A, forwardMap);
+      lo = sh.glo; hi = sh.ghi;
+      for(let a = 0; a < 3; a++){
+        const pad = Math.max((hi[a] - lo[a]) * 0.02, 1e-4);
+        lo[a] -= pad; hi[a] += pad;
+      }
+    }
     out.forEach((m, j) => { m.blo = sh.lo[j]; m.bhi = sh.hi[j]; });
-    // the attractor is the union of the per-state hulls
-    const lo = [0, 1, 2].map(r => Math.min(...sh.lo.map(v => v[r])));
-    const hi = [0, 1, 2].map(r => Math.max(...sh.hi.map(v => v[r])));
+    out.affine = affine;
     out.hull = { lo, hi };
     out.xaos = A;
 
