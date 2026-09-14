@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.49.0-scale-ceiling';
+export const BUILD = '0.50.0-crop-box';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -103,6 +103,11 @@ uniform highp sampler3D uSdf;   // GLSL ES has no default precision for sampler3
 uniform vec3  uSdfLo;
 uniform vec3  uSdfHi;
 uniform float uSdfRange;       // world distance encoded by the full 0..1 texture range
+
+// Crop box: a world-space clip applied to the finished estimate, so shadows, ambient occlusion
+// and reflections all see the same cropped object rather than the uncropped one.
+uniform vec3  uCropLo;
+uniform vec3  uCropHi;
 
 uniform vec3  uHullLo;         // the attractor's own bounding box
 uniform vec3  uHullHi;

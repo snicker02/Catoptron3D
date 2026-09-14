@@ -97,6 +97,7 @@ export function normalizeCfg(cfg){
     // 0 = off. Otherwise the walk stops once the accumulated expansion passes this, because
     // beyond it prim(q)/s is zero for every point in the frame and everything reads as a hit.
     scaleCap: Math.max(0, +cfg.scaleCap || 0),
+    crop:     !!cfg.crop,
     // Beam width for the flame walk. Only meaningful for a stack that is exactly one Flame IFS
     // op, because a beam has to carry its branches ACROSS iterations and the general fold stack
     // interleaves other operators between them.
@@ -127,7 +128,7 @@ export function signature(cfg){
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
           c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.voxel ? 1 : 0, c.bestDepth ? 1 : 0,
-          c.scaleCap, c.flameBeam, c.bounces,
+          c.scaleCap, c.crop ? 1 : 0, c.flameBeam, c.bounces,
           c.flameN, c.flameSelect, (c.flameVars || []).join(''),
           (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
@@ -439,7 +440,7 @@ ${useBeam ? `
 // IFS op; anything else interleaves operators between the levels and there is nothing to carry.
 #define BEAM ${cfg.flameBeam}
 
-float mapT(vec3 p, out vec4 trap, out float safe){
+float mapTinner(vec3 p, out vec4 trap, out float safe){
   vec3 bq[BEAM];
   float bs[BEAM];
   bq[0] = p; bs[0] = 1.0;
@@ -519,7 +520,7 @@ float sdfAt(vec3 p){
   return (texture(uSdf, t).r * 2.0 - 1.0) * uSdfRange;
 }
 
-float mapT(vec3 p, out vec4 trap, out float safe){
+float mapTinner(vec3 p, out vec4 trap, out float safe){
   float d = sdfAt(p);
   trap = vec4(abs(p), dot(p, p));                  // position trap: the orbit no longer exists
   safe = d;
@@ -529,7 +530,7 @@ float mapT(vec3 p, out vec4 trap, out float safe){
 // ── the distance estimator ──────────────────────────────────────────────────────────────
 // s accumulates the local linear expansion of the whole fold stack; the estimate is the
 // primitive's distance in folded space divided back out by it.
-float mapT(vec3 p, out vec4 trap, out float safe){
+float mapTinner(vec3 p, out vec4 trap, out float safe){
   vec3 p0 = p;                        // the original sample point, for escape-time feedback
   gFlamePrev = -1;                    // no map has been undone yet, so nothing is forbidden
   float s = 1.0;
@@ -581,6 +582,24 @@ ${cfg.bestDepth ? `  float d = max(dbest, prim(p) / s);` : `  float d = prim(p) 
   return ${cfg.seamSurf ? 'safe' : 'd'};
 }
 `}
+
+// The crop is applied HERE, once, rather than inside each estimator variant: greedy, beam and
+// voxel all reach it, and so do the shadow, ambient-occlusion and reflection paths, which call
+// map() rather than doing their own thing. Cropping in one estimator only would have produced an
+// object whose shadow was the uncropped shape.
+//
+// Intersection of two distance functions is their maximum, and both sides are valid bounds, so
+// the result is still a valid bound. The safe step takes the same maximum: it can only grow, and
+// it stays under the true cropped distance because the inner safe step was under the inner one.
+float mapT(vec3 p, out vec4 trap, out float safe){
+  float d = mapTinner(p, trap, safe);
+${cfg.crop ? `  vec3 cc = (uCropLo + uCropHi) * 0.5, ch = (uCropHi - uCropLo) * 0.5;
+  vec3 cq = abs(p - cc) - ch;
+  float cb = length(max(cq, 0.0)) + min(max(cq.x, max(cq.y, cq.z)), 0.0);
+  d = max(d, cb);
+  safe = max(safe, cb);` : ''}
+  return d;
+}
 
 float map(vec3 p){ vec4 t; float sf; return mapT(p, t, sf); }
 

@@ -51,7 +51,8 @@ const state = {
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
   aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
-  bestDepth: 0, scaleCap: 0, normEps: 1.0,
+  bestDepth: 0, scaleCap: 0,
+  crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -206,6 +207,7 @@ function currentCfg(){
     flameBeam: state.flameBeam,
     bestDepth: !!state.bestDepth,
     scaleCap: state.scaleCap,
+    crop: !!state.crop,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -446,6 +448,12 @@ function renderScene(w, h){
   u1(L, 'uTrapScale', state.trapScale);
   u1(L, 'uTrapChan', state.trapChan);
   u1(L, 'uSelBlend', state.selBlend);
+  u3(L, 'uCropLo', state.cropCx - state.cropSx * 0.5,
+                   state.cropCy - state.cropSy * 0.5,
+                   state.cropCz - state.cropSz * 0.5);
+  u3(L, 'uCropHi', state.cropCx + state.cropSx * 0.5,
+                   state.cropCy + state.cropSy * 0.5,
+                   state.cropCz + state.cropSz * 0.5);
   u1(L, 'uTrapShift', state.trapShift);
   u1(L, 'uGlow', state.glow);
   u1(L, 'uExposure', state.exposure);
@@ -479,7 +487,8 @@ const STARTERS = {
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
            aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
-  bestDepth: 0, scaleCap: 0, normEps: 1.0,
+  bestDepth: 0, scaleCap: 0,
+  crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1702,6 +1711,26 @@ function mkSlider(label, min, max, step, val, onInput, dp){
   return row;
 }
 
+// Every explanatory note is folded away behind a disclosure arrow. They earn their keep when
+// something is wrong and are noise the rest of the time, so the default is closed — except a
+// warning, whose first words stay on the summary line so it is not hidden by being tidied away.
+function collapseNotes(root){
+  if(!root) return;
+  root.querySelectorAll('p.note').forEach(p => {
+    if(p.parentElement && p.parentElement.classList.contains('notewrap')) return;
+    const warn = p.style.color && p.style.color !== '';
+    const d = document.createElement('details');
+    d.className = 'notewrap' + (warn ? ' warn' : '');
+    const sm = document.createElement('summary');
+    const txt = (p.textContent || '').trim();
+    sm.textContent = warn ? txt.split(/(?<=[.\u2014])\s/)[0].slice(0, 90) : 'why?';
+    if(warn) sm.style.color = p.style.color;
+    d.append(sm);
+    p.replaceWith(d);
+    d.append(p);
+  });
+}
+
 function mkSelect(label, names, val, onChange, isDiscrete){
   const row = document.createElement('div');
   row.className = 'ctrl';
@@ -1729,6 +1758,7 @@ function rebuildGlobals(){
   $('globals').innerHTML = '';
   $('globalsR').innerHTML = '';
   buildGlobals();
+  collapseNotes(document.body);            // covers notes the rebuild just created
 }
 
 function buildGlobals(){
@@ -1828,6 +1858,26 @@ function buildGlobals(){
         + 'from 313 to 81 at width 2 and to 9 at width 4. Rendered coverage went 89% to 93% to '
         + '94%. It is expensive \u2014 use width 1 to navigate and raise it for the save.';
       fg.append(bn);
+    }
+    fg.append(mkSelect('Crop box', ['off', 'on'], state.crop ? 1 : 0,
+                       v => { state.crop = v; rebuildGlobals(); }, true));
+    if(state.crop){
+      // written out rather than looped: the control lint looks for a literal `state.key =`, and a
+      // loop assigning through state[k] would slip past it. Six lines is a fair price for a lint
+      // that has caught three missing widgets.
+      fg.append(mkSlider('Crop centre X', -4, 4, 0.01, state.cropCx, v => { state.cropCx = v; }, 2));
+      fg.append(mkSlider('Crop centre Y', -4, 4, 0.01, state.cropCy, v => { state.cropCy = v; }, 2));
+      fg.append(mkSlider('Crop centre Z', -4, 4, 0.01, state.cropCz, v => { state.cropCz = v; }, 2));
+      fg.append(mkSlider('Crop size X', 0.02, 8, 0.01, state.cropSx, v => { state.cropSx = v; }, 2));
+      fg.append(mkSlider('Crop size Y', 0.02, 8, 0.01, state.cropSy, v => { state.cropSy = v; }, 2));
+      fg.append(mkSlider('Crop size Z', 0.02, 8, 0.01, state.cropSz, v => { state.cropSz = v; }, 2));
+      const cn = document.createElement('p');
+      cn.className = 'note';
+      cn.textContent = 'Intersects the attractor with a box: the maximum of two distance '
+        + 'functions, applied once where every path sees it, so the shadow and the reflections '
+        + 'are of the CROPPED object rather than the whole one. Useful for cutting a section out '
+        + 'of a structure that is more interesting inside than from outside.';
+      fg.append(cn);
     }
     fg.append(mkSelect('Render mode', ['distance estimator', 'voxel field (exact, capped)'],
                        state.flameVoxel ? 1 : 0,
@@ -2030,6 +2080,7 @@ function buildPanel(){
   gi.append(mkSelect('Export size', EXPORT_SIZES.map(a => a[0]), state.exportSize,
                      v => { state.exportSize = v; }, false));
   $('imgpanel').append(gi);
+  collapseNotes(document.body);
   $('imgFile').addEventListener('change', e => loadImageFile(e.target.files[0]));
   $('imgBtn').onclick = () => $('imgFile').click();
   $('imgClear').onclick = clearImage;

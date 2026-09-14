@@ -165,6 +165,8 @@ const deStacks = [
   { label: 'flame beam 4',   stack: [{ type: 26, p: [1] }], iters: 5, prim: 7, flameBeam: 4,
     flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/flame-ifs-base.flame', import.meta.url),'utf8'));
                     f.select = 3; return f; })() },
+  { label: 'crop box', stack: [{ type: 8, p: [0.42] }, { type: 5, p: [1] }], iters: 8, prim: 0,
+    crop: true },
   { label: 'scale ceiling', stack: [{ type: 26, p: [1] }], iters: 8, prim: 7, scaleCap: 1e5,
     flame: (() => { const f = parseFlame(readFileSync(new URL('../examples/flame-ifs-base.flame', import.meta.url),'utf8'));
                     f.select = 3; return f; })() },

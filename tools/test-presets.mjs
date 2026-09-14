@@ -837,6 +837,47 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        signature({ ...base, scaleCap: 1e4 }) !== signature({ ...base, scaleCap: 1e8 }));
   }
 
+  // CROP BOX. Applied in ONE wrapper around every estimator variant, so the greedy walk, the
+  // beam, the voxel field, and the shadow / AO / reflection paths all see the same cropped
+  // object. Cropping inside a single estimator would give a cropped shape with an uncropped
+  // shadow.
+  {
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const base = { stack: [{ type: 8, p: [0.42] }], prim: 0, iters: 6, steps: 128,
+                   ao: true, shadow: true, glow: false, bounces: 1 };
+    const off = assemble(base), on = assemble({ ...base, crop: true });
+    ok('crop emits nothing when off', !off.includes('d = max(d, cb);'));
+    ok('crop is an intersection when on',
+       on.includes('d = max(d, cb);') && on.includes('safe = max(safe, cb);'));
+    ok('and changes the program', signature(base) !== signature({ ...base, crop: true }));
+    ok('there is exactly one mapT wrapper',
+       (on.match(/float mapT\(vec3 p, out vec4 trap, out float safe\)\{/g) || []).length === 1);
+    ok('the estimators became mapTinner', on.includes('float mapTinner('));
+    // it must reach every variant, including the ones with their own estimator
+    const fl5 = parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+    fl5.select = 3;
+    const fb = { stack: [{ type: 26, p: [0.2] }], prim: 7, iters: 6, steps: 128,
+                 ao: false, shadow: false, glow: false, bounces: 0, flame: fl5, crop: true };
+    ok('the beam variant is cropped too',
+       assemble({ ...fb, flameBeam: 2 }).includes('d = max(d, cb);'));
+    ok('and the voxel variant', assemble({ ...fb, voxel: true }).includes('d = max(d, cb);'));
+  }
+
+  // COLLAPSED NOTES. Every explanatory note folds away behind a disclosure arrow, done by walking
+  // the finished panel rather than by editing each note, so notes added later are covered.
+  {
+    const js3 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const html3 = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    ok('there is a single collapse pass', /function collapseNotes\(root\)/.test(js3));
+    ok('it walks for p.note rather than naming each one', /querySelectorAll\('p\.note'\)/.test(js3));
+    ok('it is idempotent', /classList\.contains\('notewrap'\)/.test(js3));
+    ok('it runs after both panel builds',
+       (js3.match(/collapseNotes\(document\.body\)/g) || []).length === 2);
+    ok('a warning keeps its first words on the summary line', /warn \? txt\.split/.test(js3));
+    ok('the disclosure arrow is styled', /details\.notewrap>summary::before/.test(html3));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

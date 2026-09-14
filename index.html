@@ -205,6 +205,17 @@ button.xa.on{background:var(--ice1);border-color:var(--ice1)}
   color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
 }
 .tin::placeholder{color:var(--note)}
+/* Notes fold away. They matter when something is wrong and are clutter the rest of the time. */
+details.notewrap{margin:4px 0 8px}
+details.notewrap>summary{
+  cursor:pointer;list-style:none;font-family:var(--mono);font-size:10px;color:var(--note);
+  opacity:.75;padding:1px 0;user-select:none}
+details.notewrap>summary::-webkit-details-marker{display:none}
+details.notewrap>summary::before{content:'\25B8 ';display:inline-block;transition:transform .12s}
+details.notewrap[open]>summary::before{transform:rotate(90deg)}
+details.notewrap>summary:hover{opacity:1}
+details.notewrap.warn>summary{opacity:1}
+details.notewrap>p.note{margin:4px 0 0 10px}
 label.chk{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;
   color:var(--note);cursor:pointer}
 label.chk input{margin:0}

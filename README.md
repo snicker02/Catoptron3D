@@ -241,6 +241,28 @@ point grid, and the suite applies the JS forward to the result and requires `V(V
 That caught four wrong on the first pass — `unpolar`, `polar`, `zscale` and `zcone`, where I had
 guessed the formula from the name. All 23 now agree to float32 precision.
 
+### Crop box
+
+Intersects the attractor with a world-space box: the maximum of two distance functions, which is
+still a valid bound because both sides are.
+
+It is applied in ONE wrapper around every estimator variant rather than inside each of them. There
+are three — greedy, beam, voxel — and the shadow, ambient-occlusion and reflection paths all call
+`map()`. Cropping inside a single estimator would have produced a cropped shape casting an
+uncropped shadow.
+
+Useful for cutting a section out of a structure that is more interesting inside than from outside.
+
+### Notes fold away
+
+Every explanatory note in the panels now sits behind a disclosure arrow, closed by default. They
+earn their keep when something is wrong and are clutter the rest of the time.
+
+Done by walking the finished panel for `p.note` and wrapping each one, rather than by editing each
+note in place — so notes added later are covered without anyone remembering to. The pass is
+idempotent, and a WARNING keeps its first sentence on the summary line, because a warning that is
+hidden by being tidied away is worse than no warning.
+
 ### Restraining a runaway flame
 
 Every flame failure in this project has the same shape. Each pass multiplies the accumulated
