@@ -241,6 +241,33 @@ point grid, and the suite applies the JS forward to the result and requires `V(V
 That caught four wrong on the first pass — `unpolar`, `polar`, `zscale` and `zcone`, where I had
 guessed the formula from the name. All 23 now agree to float32 precision.
 
+### Restraining a runaway flame
+
+Every flame failure in this project has the same shape. Each pass multiplies the accumulated
+expansion `s`, and most variation inverses divide by the amount somewhere — so a **small amount
+carries a floor of 1/|amount| per pass** however harmless the geometry looks. Past about 1e12,
+`prim(q)/s` is zero for every point in the frame and everything reads as solid.
+
+That floor is predictable, so the Flame tab now reports it instead of leaving it to be found by
+sliding things at random:
+
+| flame | floor per pass | projected s |
+|---|---|---|
+| exp at amount 0.015, 8 iterations | **66.7** | **2.6e19** |
+| log at amount 0.10, 9 iterations | 10.0 | 2.2e11 |
+| log at amount 0.70, 9 iterations | 1.7 | 5.4e3 |
+| plain affine, 12 iterations | 2.0 | 4.1e3 |
+
+Above 1e9 the panel names the worst transform and its per-pass figure.
+
+**Scale ceiling** (Quality) is the restraint itself: the walk stops once `s` passes the ceiling,
+keeping the estimate at the last depth where it still meant something. On the exp flame that
+nothing else recovered, a ceiling of 1e5 took visible structure from 0.02 to **2.64** — a coarse
+picture of the right object instead of a fine wash of noise, which is the trade it makes.
+
+The right value is flame-dependent, which is why it is off by default and why the projection is
+reported: 1e8 was too loose on that flame and 1e3 too tight.
+
 ### When the accumulated scale runs away
 
 A separate problem on the same flame, and one that is NOT fixed. `exp` at amount 0.015 has an

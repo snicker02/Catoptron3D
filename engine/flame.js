@@ -642,3 +642,29 @@ export function flameKey(flame){
 }
 
 export function flameVars(flame){ return resolveFlame(flame).map(m => m.vari); }
+
+// The GUARANTEED minimum expansion of a variation's inverse, per pass.
+//
+// Most inverses divide by the amount somewhere, so they carry a floor of 1/|amount| however
+// benign the geometry looks. That floor is what makes a small amount dangerous: log at 0.1
+// multiplies the accumulated scale by at least 10 every iteration, and after nine passes s is
+// past 1e9 — at which point prim(q)/s is zero for every point and the frame reads as solid.
+//
+// Reporting it lets the panel say WHY a flame washes out, instead of leaving it to be discovered
+// by sliding things at random.
+export function inverseFloor(m){
+  const a = Math.max(Math.abs(m.vamt), 1e-5);
+  switch(m.vari | 0){
+    case 1:  return 1;              // spherical3D: an involution, the amount cancels
+    case 9:  return 1;              // zcone: no division by the amount
+    case 22: return 1 / a;          // mobius3D
+    default: return 1 / a;          // everything else divides by the amount at least once
+  }
+}
+
+// Worst-case accumulated scale after `iters` passes, using each map's affine expansion too.
+export function projectedScale(maps, iters){
+  if(!maps.length) return 1;
+  const per = Math.max(...maps.map(m => inverseFloor(m) * (m.expand || 1)));
+  return Math.pow(per, Math.max(1, iters | 0));
+}

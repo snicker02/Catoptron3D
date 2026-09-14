@@ -14,6 +14,7 @@ import { capture, apply as applyPreset, encode, decode, parseAny,
          PRESET_VERSION } from './engine/preset.js';
 import { FACTORY } from './engine/factory.js';
 import { buildField } from './engine/voxel.js';
+import { inverseFloor, projectedScale } from './engine/flame.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
          FLAME_VARIATIONS, flameVars, VP_SLOTS, defaultVP, xaosIsTrivial } from './engine/flame.js';
@@ -50,7 +51,7 @@ const state = {
   feedback: 0, bailout: 6.0, juliaCx: 0.0, juliaCy: 0.0, juliaCz: 0.0,
   // march
   aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
-  bestDepth: 0, normEps: 1.0,
+  bestDepth: 0, scaleCap: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
   lightAzim: 55, lightElev: 42, ambient: 0.30, ao: 0.75, aoRadius: 0.2, shadow: 0.0,
@@ -204,6 +205,7 @@ function currentCfg(){
     voxel: !!(state.flameVoxel && state.flame && voxField),
     flameBeam: state.flameBeam,
     bestDepth: !!state.bestDepth,
+    scaleCap: state.scaleCap,
     primStyle: Math.round(state.primStyle),
     iters:  Math.round(state.iters),
     steps:  Math.round(state.steps),
@@ -477,7 +479,7 @@ const STARTERS = {
     set: { iters: 8, ifsScale: 1.9, ifsCx: 1, ifsCy: 1, ifsCz: 1,
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
            aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
-  bestDepth: 0, normEps: 1.0,
+  bestDepth: 0, scaleCap: 0, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
@@ -1770,6 +1772,20 @@ function buildGlobals(){
         + 'your camera distance, press New\u2019s framing or set Camera distance to match.';
       fg.append(na);
     }
+    const proj = projectedScale(rf, state.iters);
+    if(proj > 1e9){
+      const worst = rf.map((m, i) => [inverseFloor(m) * (m.expand || 1), i])
+                      .sort((a, b) => b[0] - a[0])[0];
+      const ps = document.createElement('p');
+      ps.className = 'note';
+      ps.style.color = 'var(--warn1)';
+      ps.textContent = 'RUNAWAY SCALE. After ' + state.iters + ' iterations the accumulated '
+        + 'expansion reaches about ' + proj.toExponential(1) + '. Past roughly 1e12 the estimate '
+        + 'is zero everywhere and the frame fills with false surface. The largest contributor is '
+        + 'T' + (worst[1] + 1) + ' at ' + worst[0].toFixed(1) + ' per pass \u2014 raise its '
+        + 'Var amount away from zero, drop Iterations, or set a Scale ceiling in Quality.';
+      fg.append(ps);
+    }
     const ov = rf.boxOverlap;
     if(ov && ov.pairs){
       const ex = document.createElement('p');
@@ -1950,6 +1966,20 @@ function buildGlobals(){
       // Anti-aliasing is compile-time, so this is a select with the 'baked' tag rather than a
       // slider: picking a new count swaps the program. It applies to SAVES and quick renders,
       // never to the live viewport — 4x or 9x per frame while orbiting would be unusable.
+      g.append(mkSelect('Scale ceiling',
+                        ['off', '1e4', '1e5', '1e6', '1e8', '1e10'],
+                        [0,1e4,1e5,1e6,1e8,1e10].indexOf(state.scaleCap) < 0 ? 0
+                          : [0,1e4,1e5,1e6,1e8,1e10].indexOf(state.scaleCap),
+                        v => { state.scaleCap = [0,1e4,1e5,1e6,1e8,1e10][v]; }, true));
+      const sc = document.createElement('p');
+      sc.className = 'note';
+      sc.textContent = 'THE restraint on a runaway flame. Each pass multiplies the accumulated '
+        + 'expansion, and a variation whose inverse divides by a small amount multiplies it hard '
+        + '\u2014 past about 1e12 the estimate is zero for every point and the frame reads as '
+        + 'solid. Stopping the walk at a ceiling keeps the last depth that still meant something: '
+        + 'a coarse picture of the right object instead of a fine wash of noise. The Flame tab '
+        + 'reports the projected scale so the value is not a guess.';
+      g.append(sc);
       g.append(mkSelect('Estimate depth', ['final only', 'best of all depths'],
                         state.bestDepth ? 1 : 0, v => { state.bestDepth = v; }, true));
       const bd = document.createElement('p');

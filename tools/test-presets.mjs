@@ -802,6 +802,41 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('isAffine keys off the variation', isAffine({ vari: 0 }) && !isAffine({ vari: 4 }));
   }
 
+  // RUNAWAY SCALE. Every flame failure in this project's history has the same shape: the
+  // accumulated expansion grows past the point where prim(q)/s is representable and the frame
+  // reads as solid. The floor is predictable from the amount alone, so it can be reported rather
+  // than discovered by sliding things at random.
+  {
+    const { inverseFloor, projectedScale } = await import(new URL('../engine/flame.js', import.meta.url).href);
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const X = o => ({ M:[1,0,0,0,1,0,0,0,1], T:[0,0,0], scale:1, rot:[0,0,0], tr:[0,0,0],
+                      vari:0, vamt:1, vp:[0.8,2,0,0,0,0,0,0,1,0,0,0],
+                      chaos:null, on:true, weight:1, ...o });
+    const mk = maps => resolveFlame({ name:'t', select:2, maps });
+
+    ok('a small amount raises the inverse floor',
+       inverseFloor({ vari:5, vamt:0.1 }) > 9 && inverseFloor({ vari:5, vamt:1.0 }) < 1.1);
+    ok('spherical3D is an involution, so its amount cancels',
+       Math.abs(inverseFloor({ vari:1, vamt:0.01 }) - 1) < 1e-9);
+
+    const bad = mk([X({ vari:4, vamt:0.015, scale:0.25 }),
+                    X({ M:[0.5,0,0,0,0.5,0,0,0,0.5], vamt:-1.23 })]);
+    const good = mk([X({ vari:5, vamt:0.7, scale:0.55 }), X({ vamt:0.6 }), X({ vamt:-0.6 })]);
+    ok('the pathological flame is projected as runaway', projectedScale(bad, 8) > 1e15,
+       projectedScale(bad, 8).toExponential(1));
+    ok('and a healthy one is not', projectedScale(good, 9) < 1e6,
+       projectedScale(good, 9).toExponential(1));
+
+    // the ceiling itself
+    const base = { stack:[{type:8,p:[0.42]}], prim:0, iters:8, steps:128,
+                   ao:false, shadow:false, glow:false, bounces:0 };
+    ok('no ceiling by default', !assemble(base).includes('if(s >'));
+    ok('a ceiling emits an early exit', assemble({ ...base, scaleCap: 1e5 }).includes('break;'));
+    ok('and changes the program', signature(base) !== signature({ ...base, scaleCap: 1e5 }));
+    ok('ceilings are distinct programs',
+       signature({ ...base, scaleCap: 1e4 }) !== signature({ ...base, scaleCap: 1e8 }));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

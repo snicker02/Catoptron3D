@@ -94,6 +94,9 @@ export function normalizeCfg(cfg){
     aa:       Math.max(1, Math.min(4, cfg.aa | 0 || 1)),
     voxel:    !!cfg.voxel,
     bestDepth: !!cfg.bestDepth,
+    // 0 = off. Otherwise the walk stops once the accumulated expansion passes this, because
+    // beyond it prim(q)/s is zero for every point in the frame and everything reads as a hit.
+    scaleCap: Math.max(0, +cfg.scaleCap || 0),
     // Beam width for the flame walk. Only meaningful for a stack that is exactly one Flame IFS
     // op, because a beam has to carry its branches ACROSS iterations and the general fold stack
     // interleaves other operators between them.
@@ -124,7 +127,7 @@ export function signature(cfg){
   return [c.prim, c.primStyle, c.iters, c.steps, c.ao ? 1 : 0, c.shadow ? 1 : 0, c.glow ? 1 : 0,
           c.seamSurf ? 1 : 0, c.feedback, c.env ? 1 : 0, c.tex ? 1 : 0,
           c.transp ? 1 : 0, c.disp ? 1 : 0, c.aa, c.voxel ? 1 : 0, c.bestDepth ? 1 : 0,
-          c.flameBeam, c.bounces,
+          c.scaleCap, c.flameBeam, c.bounces,
           c.flameN, c.flameSelect, (c.flameVars || []).join(''),
           (c.flameXaos || []).map(r => r.join('')).join(''), ops].join('|');
 }
@@ -549,6 +552,15 @@ ${cfg.feedback ? `    // Escape-time bailout. Without it a power map runs to inf
 ` : ''}${folds}
     trap = min(trap, vec4(abs(p), dot(p, p)));${contraction}
 ${cfg.bestDepth ? `    dbest = max(dbest, prim(p) / s);` : ''}
+${cfg.scaleCap ? `    // SCALE CEILING. Every iteration multiplies s by the local expansion, and a variation
+    // whose inverse has a large Lipschitz factor multiplies it hard: log at amount 0.1 contributes
+    // at least 10 per pass, exp at 0.015 at least 67. Ten passes of that puts s past 1e20, where
+    // prim(q)/s is zero everywhere and the whole frame reads as solid.
+    //
+    // Stopping the walk keeps the estimate at the last depth where it still meant something. It
+    // gives up resolution — the surface is coarser than the iteration count promises — and that
+    // is the trade: a coarse picture of the right object instead of a fine wash of noise.
+    if(s > ${cfg.scaleCap.toExponential(3)}) break;` : ''}
   }
 ${cfg.bestDepth ? `  float d = max(dbest, prim(p) / s);` : `  float d = prim(p) / s;`}
   // The seam bounds how far the marcher may ADVANCE, but it is not a surface — unless you ask
