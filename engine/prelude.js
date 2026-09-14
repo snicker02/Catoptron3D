@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.51.0-image-ambiguity';
+export const BUILD = '0.52.0-overlap-trim';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -106,6 +106,10 @@ uniform float uSdfRange;       // world distance encoded by the full 0..1 textur
 
 // Crop box: a world-space clip applied to the finished estimate, so shadows, ambient occlusion
 // and reflections all see the same cropped object rather than the uncropped one.
+// Shrinks each transform's SELECTION region toward its centre. 1 = the image box as computed.
+// Below 1 the regions stop overlapping, so the walk has something to discriminate on again.
+uniform float uBoxTrim;
+
 uniform vec3  uCropLo;
 uniform vec3  uCropHi;
 

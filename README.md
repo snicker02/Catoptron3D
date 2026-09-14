@@ -433,6 +433,32 @@ WORSE: coverage rose from 73% to 90% and boxy slabs appeared, because a boxier c
 boxier geometry. Reverted. That is the fourth time in this project a metric and a picture have
 disagreed and the picture has been right.
 
+### Overlap trim
+
+Where two transforms' images share volume a point genuinely has several valid preimages, and the
+walk is guessing between them. **Overlap trim** shrinks each transform's SELECTION region toward
+its centre, which gives the walk something to separate them by.
+
+It does not change the flame. The maps, the attractor and the hull are untouched — only which
+branch the walk commits to, and every branch was valid to begin with. It is a uniform, so it costs
+no recompile.
+
+Measured on a 21%-ambiguous flame, the fraction of frame that is featureless flat sheet:
+
+| trim | flat-sheet area | coverage |
+|---|---|---|
+| 1.00 (off) | 31.3% | 91.7% |
+| 0.90 | 28.8% | 90.1% |
+| **0.75** | **27.4%** | 82.5% |
+| 0.60 | 35.3% | 70.0% |
+
+The useful band is about **0.75 to 0.95**. Below roughly 0.7 it reverses: a point in the
+trimmed-away rim gets assigned to a map whose image it is not in, that estimate comes back too
+large, and the surface thins — which is why 0.60 scores WORSE than doing nothing.
+
+Only the image-box and blend rules select on regions, so the trim does nothing under nearest image
+or nearest fixed point.
+
 ### Overlapping images, and why oriented boxes were not built
 
 "Image box" is exact only while the transforms' images are disjoint. The obvious next step was a

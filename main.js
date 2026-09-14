@@ -52,6 +52,7 @@ const state = {
   // march
   aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
   bestDepth: 0, scaleCap: 0,
+  boxTrim: 1.0,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
@@ -448,6 +449,7 @@ function renderScene(w, h){
   u1(L, 'uTrapScale', state.trapScale);
   u1(L, 'uTrapChan', state.trapChan);
   u1(L, 'uSelBlend', state.selBlend);
+  u1(L, 'uBoxTrim', state.boxTrim);
   u3(L, 'uCropLo', state.cropCx - state.cropSx * 0.5,
                    state.cropCy - state.cropSy * 0.5,
                    state.cropCz - state.cropSz * 0.5);
@@ -488,6 +490,7 @@ const STARTERS = {
            prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06,
            aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
   bestDepth: 0, scaleCap: 0,
+  boxTrim: 1.0,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
@@ -1816,6 +1819,20 @@ function buildGlobals(){
         + 'Var amount away from zero, drop Iterations, or set a Scale ceiling in Quality.';
       fg.append(ps);
     }
+    fg.append(mkSlider('Overlap trim', 0.5, 1.0, 0.005, state.boxTrim,
+                       v => { state.boxTrim = v; }, 3));
+    const tn = document.createElement('p');
+    tn.className = 'note';
+    tn.textContent = 'Shrinks each transform\u2019s SELECTION region toward its centre. Where two '
+      + 'images share volume a point has several valid preimages and the walk is guessing; '
+      + 'trimming gives it something to separate them by. It does NOT change the flame \u2014 the '
+      + 'maps, the attractor and the hull are untouched \u2014 only which branch the walk commits '
+      + 'to, and every branch was valid anyway. Measured on a 21%-ambiguous flame, flat-sheet area '
+      + 'fell 31% to 27% between 1.0 and 0.75. Below about 0.7 it starts eroding: a point in the '
+      + 'trimmed-away rim gets assigned to a map whose image it is not in, and the surface thins. '
+      + 'Only affects the image-box and blend rules.';
+    fg.append(tn);
+
     // Search width, render mode and the crop box were lost when the ambiguity message replaced
     // the old box-overlap block: the slice ran from one marker to another and took the controls
     // sitting between them with it. The control lint caught all ten keys.

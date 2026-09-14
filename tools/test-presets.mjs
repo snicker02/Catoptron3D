@@ -906,6 +906,36 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('and it is deterministic', Math.abs(a1 - fb.ambiguity) < 1e-12);
   }
 
+  // OVERLAP TRIM. Shrinks each transform's selection region toward its centre. It must reach the
+  // box AND blend rules, and the beam, and must leave the flame itself alone — the maps, the
+  // attractor and the hull are not touched, only which valid branch the walk commits to.
+  {
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const ft = parseFlameTop(readFileSync(
+      new URL('../examples/flame-ifs-base.flame', import.meta.url), 'utf8'));
+    const base = { stack: [{ type: 26, p: [0.2] }], prim: 7, iters: 6, steps: 128,
+                   ao: false, shadow: false, glow: false, bounces: 0 };
+    const withSel = sel => { const f2 = { ...ft, select: sel, maps: ft.maps }; return assemble({ ...base, flame: f2 }); };
+    ok('the box rule selects on trimmed regions', withSel(2).includes('sdBoxLoHi(p, trimLo('));
+    ok('the blend rule does too', withSel(3).includes('mix(sdBoxLoHi(p, trimLo('));
+    ok('nearest image is unaffected', !withSel(0).includes('trimLo('));
+    ok('nearest fixed point is unaffected', !withSel(1).includes('trimLo('));
+    const f3 = { ...ft, select: 2, maps: ft.maps };
+    ok('the beam selects on trimmed regions too',
+       assemble({ ...base, flame: f3, flameBeam: 2 }).includes('trimLo('));
+    ok('the helper is declared before it is used', (src => {
+      const a = src.indexOf('vec3 trimLo(int i)'), b = src.indexOf('sdBoxLoHi(p, trimLo(');
+      return a >= 0 && b > a;
+    })(withSel(2)));
+    // the trim is a uniform, so it must NOT change the program
+    ok('trimming does not force a recompile',
+       signature({ ...base, flame: f3 }) === signature({ ...base, flame: f3 }));
+    // and it must not disturb the resolved flame at all
+    const before = JSON.stringify(resolveFlame(f3).map(m => [m.M, m.T, m.blo, m.bhi]));
+    const after = JSON.stringify(resolveFlame(f3).map(m => [m.M, m.T, m.blo, m.bhi]));
+    ok('the flame itself is untouched by the trim', before === after);
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
@@ -992,8 +1022,10 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     fl.select = sel;
     const g = assemble({ stack: [{ type: 26, p: [1] }], prim: 7, iters: 4, steps: 96,
                          ao: false, shadow: false, glow: false, bounces: 0, flame: fl });
+    // the box rule now selects on TRIMMED regions, so match the trim helper rather than the
+    // raw uniform it used to read
     return g.includes('mix(sdBoxLoHi') ? 'blend'
-         : g.includes('sdBoxLoHi(p, uFlameBLo') ? 'box'
+         : g.includes('sdBoxLoHi(p, trimLo(') ? 'box'
          : g.includes('uFlameFp[0]') ? 'fixed' : 'image';
   });
   ok('each selection mode emits its own rule',
@@ -1005,6 +1037,7 @@ console.log('preset format v' + PRESET_VERSION + '\n');
                           ao: false, shadow: false, glow: false, bounces: 0, flame: fl });
   ok('the blend mode emits the mixed metric', bsrc.includes('mix(sdBoxLoHi'));
   ok('and still emits the box helper it needs', bsrc.includes('float sdBoxLoHi'));
+  ok('and the trim helper', bsrc.includes('vec3 trimLo(int i)'));
 }
 
 // 11c. CLIPBOARD. A preset travels as JSON, as a bare payload, or inside a share URL, and a

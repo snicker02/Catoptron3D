@@ -154,7 +154,12 @@ export function assemble(cfgIn){
   const helperNames = ['rot3', 'palette',
                        ...(useFrame ? prim.frameDeps : prim.deps)];
   cfg.stack.forEach(sl => (OPS[sl.type].deps || []).forEach(h => helperNames.push(h)));
-  const helperSrc = resolveHelpers(helperNames);
+  const needTrim = (cfg.flameSelect === 2 || cfg.flameSelect === 3) && cfg.flameN;
+  const TRIM_SRC = needTrim ? `
+vec3 trimLo(int i){ vec3 c = (uFlameBLo[i] + uFlameBHi[i]) * 0.5; return c + (uFlameBLo[i] - c) * uBoxTrim; }
+vec3 trimHi(int i){ vec3 c = (uFlameBLo[i] + uFlameBHi[i]) * 0.5; return c + (uFlameBHi[i] - c) * uBoxTrim; }
+` : '';
+  const helperSrc = resolveHelpers(helperNames) + TRIM_SRC;
 
   // ── op bodies, deduped by EMITTED name (so two slots of the same op+mode share one body,
   //    but the same op at two different discrete modes emits two distinct functions) ──
@@ -322,12 +327,12 @@ ${cfg.flameSelect === 2 ? `      // IMAGE BOX: for an affine IFS the exact rule 
       // of the attractor's hull under an axis-aligned map IS a box, so the test is exact rather
       // than a heuristic. On a Jerusalem cube the 20 image boxes are perfectly disjoint and this
       // misses ZERO attractor cells, where nearest-image missed most of them.
-      float d = sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]) * bias;` :
+      float d = sdBoxLoHi(p, trimLo(${k}), trimHi(${k})) * bias;` :
   cfg.flameSelect === 3 ? `      // BLEND. Both rules are LENGTHS on the same scale — distance from p to this map's image
       // box, and the size of the preimage q — so they interpolate directly. At 0 this is exactly
       // image box; at 1 it orders identically to nearest image, since argmin |q| and argmin |q|^2
       // agree. In between it trades accuracy for smoothness continuously.
-      float d = mix(sdBoxLoHi(p, uFlameBLo[${k}], uFlameBHi[${k}]),
+      float d = mix(sdBoxLoHi(p, trimLo(${k}), trimHi(${k})),
                     length(q), clamp(uSelBlend, 0.0, 1.0)) * bias;` :
 `      vec3 dv = ${cfg.flameSelect ? `p - uFlameFp[${k}]` : 'q'};
       float d = dot(dv, dv) * bias;`}
@@ -341,6 +346,14 @@ ${useXaos ? `      // this map may only be the predecessor if xaos allows it to 
   // Exactly one mapT may exist. The beam replaces the greedy walk rather than joining it.
   const useBeam = !cfg.voxel && cfg.flameBeam > 1 && cfg.flameN &&
                   cfg.stack.length === 1 && OPS[cfg.stack[0].type].name === 'Flame IFS';
+
+  // OVERLAP TRIM. Where two transforms' images share volume a point has several valid preimages
+  // and the walk is guessing; shrinking the regions it selects on gives it something to separate
+  // them by. It does NOT change the flame — the maps, the attractor and the hull are untouched —
+  // only which branch the walk commits to, and every branch was valid to begin with.
+  //
+  // The cost is at the edges: a point in the trimmed-away rim gets assigned to a map whose image
+  // it is not really in, and that estimate can come back too large, which shows as thinning.
 
   const BOXSEL = (cfg.flameSelect === 2 || cfg.flameSelect === 3) ? `
 float sdBoxLoHi(vec3 p, vec3 lo, vec3 hi){
@@ -469,8 +482,8 @@ ${(cfg.flameVars || []).slice(0, cfg.flameN).map((v, k) => `
 ${(V_INV[v] || V_INV[0])(k)}
         q = uFlameMi[${k}] * q + uFlameTi[${k}];
         float ex = ve * uFlameEx[${k}];
-${cfg.flameSelect === 2 ? `        float d = sdBoxLoHi(pb, uFlameBLo[${k}], uFlameBHi[${k}]) / bs[b];` :
-  cfg.flameSelect === 3 ? `        float d = mix(sdBoxLoHi(pb, uFlameBLo[${k}], uFlameBHi[${k}]),
+${cfg.flameSelect === 2 ? `        float d = sdBoxLoHi(pb, trimLo(${k}), trimHi(${k})) / bs[b];` :
+  cfg.flameSelect === 3 ? `        float d = mix(sdBoxLoHi(pb, trimLo(${k}), trimHi(${k})),
                       length(q), clamp(uSelBlend, 0.0, 1.0)) / bs[b];` :
   cfg.flameSelect === 1 ? `        float d = dot(pb - uFlameFp[${k}], pb - uFlameFp[${k}]) / bs[b];` :
 `        float d = dot(q, q) / bs[b];`}
