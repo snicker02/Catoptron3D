@@ -43,6 +43,8 @@ const PALETTES = [
 const state = {
   // camera
   tgtX: 0, tgtY: 0, tgtZ: 0,
+  camMode: 0,                      // 0 = orbit around the target, 1 = free flight
+  flyX: 0, flyY: 0, flyZ: 5.2, flyYaw: -1.5708, flyPitch: 0, flySpeed: 1.0,
   camDist: 5.2, camAzim: 0.9, camElev: 0.35, fov: 1.3, autoSpin: 0.0,
   // structure
   prim: 0, primStyle: 0, primSize: 1.0, primRound: 0.06, primAux: 0.35, primThick: 0.03,
@@ -84,12 +86,12 @@ const DEFAULT_STATE = JSON.parse(JSON.stringify(state));
 /* ── control schema — drives the panel AND declares ranges ─────────────────────────────── */
 const GROUPS = [
   ['Camera', [
-    ['camDist',  'Distance',    1.2, 40,  0.05, 2],
+    ['camDist',  'Distance',    1.2, 40,  0.05, 2, 'orbit'],
     ['fov',      'FOV',         0.5, 3.0, 0.01, 2],
-    ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2],
-    ['tgtX',     'Target X',   -8, 8, 0.005, 3],
-    ['tgtY',     'Target Y',   -8, 8, 0.005, 3],
-    ['tgtZ',     'Target Z',   -8, 8, 0.005, 3]
+    ['autoSpin', 'Auto-spin',  -1.5, 1.5, 0.01, 2, 'orbit'],
+    ['tgtX',     'Target X',   -8, 8, 0.005, 3, 'orbit'],
+    ['tgtY',     'Target Y',   -8, 8, 0.005, 3, 'orbit'],
+    ['tgtZ',     'Target Z',   -8, 8, 0.005, 3, 'orbit']
   ]],
   ['IFS recursion', [
     ['iters',    'Iterations',  1, 24,   1,     0],
@@ -258,6 +260,7 @@ const u3 = (L, n, a, b, c) => { if(L[n]) gl.uniform3f(L[n], a, b, c); };
 const u4 = (L, n, a, b, c, d) => { if(L[n]) gl.uniform4f(L[n], a, b, c, d); };
 
 function camPos(){
+  if(state.camMode) return [state.flyX, state.flyY, state.flyZ];
   // Orbit AROUND the target, not around the origin. Imported flames are rarely centred on the
   // origin — a Jerusalem cube occupies [0,1]^3 — so without this they sit off to one side and
   // orbiting swings them out of frame.
@@ -265,6 +268,41 @@ function camPos(){
   return [state.tgtX + Math.cos(state.camAzim) * ce * state.camDist,
           state.tgtY + se * state.camDist,
           state.tgtZ + Math.sin(state.camAzim) * ce * state.camDist];
+}
+
+// Where the camera looks. In orbit that is the target; in flight it is one unit ahead, which is
+// all the shader needs since it only uses the DIRECTION.
+function flyFwd(){
+  const cp = Math.cos(state.flyPitch);
+  return [Math.cos(state.flyYaw) * cp, Math.sin(state.flyPitch), Math.sin(state.flyYaw) * cp];
+}
+
+function camTgt(){
+  if(!state.camMode) return [state.tgtX, state.tgtY, state.tgtZ];
+  const f = flyFwd();
+  return [state.flyX + f[0], state.flyY + f[1], state.flyZ + f[2]];
+}
+
+// Switching modes must not move the picture. Going INTO flight, the fly camera takes the orbit
+// camera's exact position and heading; coming OUT, the target is placed ahead along the current
+// heading at the orbit distance. Without this the view jumps and the mode is unusable for
+// composing, which is the whole point of having it.
+function syncCameraMode(toFly){
+  if(toFly){
+    const p = camPos();
+    state.flyX = p[0]; state.flyY = p[1]; state.flyZ = p[2];
+    const d = [state.tgtX - p[0], state.tgtY - p[1], state.tgtZ - p[2]];
+    const len = Math.hypot(d[0], d[1], d[2]) || 1;
+    state.flyPitch = Math.asin(Math.max(-1, Math.min(1, d[1] / len)));
+    state.flyYaw = Math.atan2(d[2], d[0]);
+  } else {
+    const f = flyFwd();
+    state.tgtX = state.flyX + f[0] * state.camDist;
+    state.tgtY = state.flyY + f[1] * state.camDist;
+    state.tgtZ = state.flyZ + f[2] * state.camDist;
+    state.camElev = Math.max(-1.5, Math.min(1.5, -state.flyPitch));
+    state.camAzim = Math.atan2(-f[2], -f[0]);
+  }
 }
 
 // Supersampling is compile-time, so switching it swaps the PROGRAM. The viewport stays at 1 and
@@ -334,7 +372,7 @@ function renderScene(w, h){
 
   const cp = camPos();
   u3(L, 'uCamPos', cp[0], cp[1], cp[2]);
-  u3(L, 'uCamTgt', state.tgtX, state.tgtY, state.tgtZ);
+  { const t = camTgt(); u3(L, 'uCamTgt', t[0], t[1], t[2]); }
   u1(L, 'uFov', state.fov);
 
   u1(L, 'uMinDist', 0.001);
@@ -497,6 +535,8 @@ const STARTERS = {
            ao: 1.0, shadow: 0, fog: 0.35, haze: 0, sun: 0,
            ambient: 0.30, spec: 0.55, rim: 0.9,
            tgtX: 0, tgtY: 0, tgtZ: 0,
+  camMode: 0,                      // 0 = orbit around the target, 1 = free flight
+  flyX: 0, flyY: 0, flyZ: 5.2, flyYaw: -1.5708, flyPitch: 0, flySpeed: 1.0,
   camDist: 5.2, fov: 1.3, camAzim: 0.9, camElev: 0.35,
            palette: 0, trapScale: 0.55, trapShift: 0.12, glow: 0,
            sat: 1.0, exposure: 1.25, renderScale: 0.75 }
@@ -687,6 +727,8 @@ const EXAMPLE_FLAMES = [
   ['Flame IFS base', 'examples/flame-ifs-base.flame', {
     prim: 7, primSize: 0.6, iters: 12, ifsScale: 1.0, ifsCx: 0, ifsCy: 0, ifsCz: 0,
     tgtX: 0, tgtY: 0, tgtZ: 0,
+  camMode: 0,                      // 0 = orbit around the target, 1 = free flight
+  flyX: 0, flyY: 0, flyZ: 5.2, flyYaw: -1.5708, flyPitch: 0, flySpeed: 1.0,
     camDist: 1.2, camAzim: 0.388, camElev: 0.275, fov: 1.86,
     aaExport: 3, normEps: 1.6, steps: 384, stepScale: 0.175, maxDist: 118.5, eps: 0.0002,
     ao: 1.0, spec: 0.6, rim: 0.7, fog: 0.05, reflect: 0.74, bounces: 4,
@@ -1353,7 +1395,11 @@ function currentPreset(name){ return capture(state, DEFAULT_STATE, OPS, name); }
 // KEEP CAMERA lets a geometry preset be viewed from where you already are. The camera is the one
 // part of a preset you are most likely to have already set by hand, and reloading a preset to
 // compare two fold stacks is useless if it also teleports you.
-const CAM_KEYS = ['camDist', 'camAzim', 'camElev', 'fov', 'tgtX', 'tgtY', 'tgtZ'];
+const CAM_KEYS = ['camDist', 'camAzim', 'camElev', 'fov', 'tgtX', 'tgtY', 'tgtZ',
+                  // the flight camera counts as the camera too, and the MODE with it: keeping the
+                  // orbit values while snapping back to orbit, or holding the mode while the
+                  // position jumps, are both worse than not keeping anything
+                  'camMode', 'flyX', 'flyY', 'flyZ', 'flyYaw', 'flyPitch', 'flySpeed'];
 
 function loadPreset(p, keepCamera){
   const r = applyPreset(p, DEFAULT_STATE, OPS);
@@ -1979,6 +2025,32 @@ function buildGlobals(){
         + 'about 1 the palette wraps more than once across one face.';
       g.append(tn);
     }
+    if(title === 'Camera'){
+      // The mode select is built here rather than in the schema because switching it has to hand
+      // the view over between two different parameterisations, and rebuild the group so the
+      // irrelevant half of the controls goes away.
+      g.append(mkSelect('Mode', ['orbit a target', 'free flight'], state.camMode ? 1 : 0,
+                        v => { syncCameraMode(!!v); state.camMode = v; rebuildGlobals(); }, false));
+      if(state.camMode){
+        g.append(mkSlider('Fly speed', 0.002, 20, 0.002, state.flySpeed,
+                          v => { state.flySpeed = v; }, 3));
+        g.append(mkSlider('Fly X', -20, 20, 0.005, state.flyX, v => { state.flyX = v; }, 3));
+        g.append(mkSlider('Fly Y', -20, 20, 0.005, state.flyY, v => { state.flyY = v; }, 3));
+        g.append(mkSlider('Fly Z', -20, 20, 0.005, state.flyZ, v => { state.flyZ = v; }, 3));
+        g.append(mkSlider('Yaw', -3.15, 3.15, 0.002, state.flyYaw, v => { state.flyYaw = v; }, 3));
+        g.append(mkSlider('Pitch', -1.55, 1.55, 0.002, state.flyPitch, v => { state.flyPitch = v; }, 3));
+        const fn = document.createElement('p');
+        fn.className = 'note';
+        fn.textContent = 'W and S along the view, A and D strafe, Q and E down and up along WORLD '
+          + 'up \u2014 tumbling while you climb is disorienting. Drag to look. The WHEEL sets '
+          + 'speed here rather than distance, because there is no distance to change and speed is '
+          + 'what you actually reach for: an imported attractor can span 0.03 units or 30, so a '
+          + 'fixed rate is useless at one end or the other. Hold shift for a quarter speed. '
+          + 'Switching modes hands the view over without moving it, so you can orbit to find a '
+          + 'composition and then fly into it. Auto-spin only applies to orbit.';
+        g.append(fn);
+      }
+    }
     if(title === 'Lighting'){
       const an2 = document.createElement('p');
       an2.className = 'note';
@@ -2072,7 +2144,10 @@ function buildGlobals(){
         + '3\u00d7 the cost; 3\u00d73 buys little more for twice that again.';
       g.append(an);
     }
-    rows.forEach(([key, label, min, max, step, dp]) => {
+    rows.forEach(([key, label, min, max, step, dp, only]) => {
+      // a row tagged 'orbit' is meaningless in flight — distance, target and auto-spin all
+      // describe orbiting something — so it is left out rather than shown doing nothing
+      if(only === 'orbit' && state.camMode) return;
       g.append(mkSlider(label, min, max, step, state[key], v => { state[key] = v; }, dp));
     });
     (RIGHT_GROUPS.has(title) ? hostR : host).append(g);
@@ -2184,14 +2259,28 @@ cv.addEventListener('pointerdown', e => { drag = true; lx = e.clientX; ly = e.cl
 cv.addEventListener('pointerup',   e => { drag = false; });
 cv.addEventListener('pointermove', e => {
   if(!drag) return;
-  state.camAzim -= (e.clientX - lx) * 0.007;
-  state.camElev = Math.max(-1.5, Math.min(1.5, state.camElev - (e.clientY - ly) * 0.007));
+  if(state.camMode){
+    // look around. Pitch stops just short of straight up or down: at exactly +/-90 degrees the
+    // camera's up vector is parallel to the view direction and the frame spins on its own.
+    state.flyYaw += (e.clientX - lx) * 0.005;
+    state.flyPitch = Math.max(-1.55, Math.min(1.55, state.flyPitch - (e.clientY - ly) * 0.005));
+  } else {
+    state.camAzim -= (e.clientX - lx) * 0.007;
+    state.camElev = Math.max(-1.5, Math.min(1.5, state.camElev - (e.clientY - ly) * 0.007));
+  }
   lx = e.clientX; ly = e.clientY;
   bumpInteract();
 });
 cv.addEventListener('wheel', e => {
-  state.camDist = Math.max(1.2, Math.min(40, state.camDist * (1 + e.deltaY * 0.0012)));
-  syncSliderDisplay('camDist');
+  if(state.camMode){
+    // in flight the wheel sets SPEED rather than distance: there is no distance to change, and
+    // the speed is what you actually need to reach for when a scene turns out to be tiny or huge
+    state.flySpeed = Math.max(0.002, Math.min(20, state.flySpeed * (1 - e.deltaY * 0.0015)));
+    setStat('fly speed ' + state.flySpeed.toFixed(3) + ' / s');
+  } else {
+    state.camDist = Math.max(1.2, Math.min(40, state.camDist * (1 + e.deltaY * 0.0012)));
+    syncSliderDisplay('camDist');
+  }
   e.preventDefault(); bumpInteract();
 }, { passive: false });
 
@@ -2204,14 +2293,37 @@ addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
 function navStep(dt){
   const fine = keys['shift'] ? 0.25 : 1;
-  const a = 1.1 * dt * fine, z = 4.0 * dt * fine;
   let moved = false;
-  if(keys['a'] || keys['arrowleft'])  { state.camAzim -= a; moved = true; }
-  if(keys['d'] || keys['arrowright']) { state.camAzim += a; moved = true; }
-  if(keys['w'] || keys['arrowup'])    { state.camElev = Math.min(1.5, state.camElev + a * 0.7); moved = true; }
-  if(keys['s'] || keys['arrowdown'])  { state.camElev = Math.max(-1.5, state.camElev - a * 0.7); moved = true; }
-  if(keys['q']) { state.camDist = Math.min(40, state.camDist + z); moved = true; }
-  if(keys['e']) { state.camDist = Math.max(1.2, state.camDist - z); moved = true; }
+
+  if(state.camMode){
+    // FLIGHT. W and S go along the view direction, A and D strafe, Q and E rise and fall along
+    // WORLD up rather than camera up — tumbling while climbing is disorienting and nobody wants
+    // it. Speed is a slider because these scenes are not one size: an imported attractor can span
+    // 0.03 units or 30, and a fixed rate is useless at one end or the other.
+    const f = flyFwd();
+    const r = [-Math.sin(state.flyYaw), 0, Math.cos(state.flyYaw)];   // right, level with the world
+    const v = state.flySpeed * dt * fine;
+    let dx = 0, dy = 0, dz = 0;
+    if(keys['w'] || keys['arrowup'])    { dx += f[0]; dy += f[1]; dz += f[2]; }
+    if(keys['s'] || keys['arrowdown'])  { dx -= f[0]; dy -= f[1]; dz -= f[2]; }
+    if(keys['d'] || keys['arrowright']) { dx += r[0]; dz += r[2]; }
+    if(keys['a'] || keys['arrowleft'])  { dx -= r[0]; dz -= r[2]; }
+    if(keys['e']) { dy += 1; }
+    if(keys['q']) { dy -= 1; }
+    if(dx || dy || dz){
+      const l = Math.hypot(dx, dy, dz) || 1;     // normalise, so diagonals are not faster
+      state.flyX += dx / l * v; state.flyY += dy / l * v; state.flyZ += dz / l * v;
+      moved = true;
+    }
+  } else {
+    const a = 1.1 * dt * fine, z = 4.0 * dt * fine;
+    if(keys['a'] || keys['arrowleft'])  { state.camAzim -= a; moved = true; }
+    if(keys['d'] || keys['arrowright']) { state.camAzim += a; moved = true; }
+    if(keys['w'] || keys['arrowup'])    { state.camElev = Math.min(1.5, state.camElev + a * 0.7); moved = true; }
+    if(keys['s'] || keys['arrowdown'])  { state.camElev = Math.max(-1.5, state.camElev - a * 0.7); moved = true; }
+    if(keys['q']) { state.camDist = Math.min(40, state.camDist + z); moved = true; }
+    if(keys['e']) { state.camDist = Math.max(1.2, state.camDist - z); moved = true; }
+  }
   if(moved) bumpInteract();
 }
 
@@ -2293,7 +2405,7 @@ function frame(now){
   fpsArr.push(1 / dt); if(fpsArr.length > 40) fpsArr.shift();
 
   navStep(dt0);                       // navigation still works while paused
-  state.camAzim += state.autoSpin * dt;
+  if(!state.camMode) state.camAzim += state.autoSpin * dt;
 
   syncProgram(now);
 

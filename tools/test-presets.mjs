@@ -936,6 +936,64 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('the flame itself is untouched by the trim', before === after);
   }
 
+  // FLY CAMERA. Orbit and flight are different parameterisations of the same view, and the whole
+  // point of having both is composing in one and moving in the other — so the handover must not
+  // move the picture. A jump on mode switch would make the mode useless for its purpose.
+  {
+    const js4 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const blk = js4.slice(js4.indexOf('function camPos(){'),
+                          js4.indexOf('// Supersampling is compile-time'));
+    const mk = () => {
+      const state = { camMode: 0, camDist: 5.2, camAzim: 0.9, camElev: 0.35,
+                      tgtX: 0.4, tgtY: -0.2, tgtZ: 1.1,
+                      flyX: 0, flyY: 0, flyZ: 0, flyYaw: 0, flyPitch: 0, flySpeed: 1 };
+      const fn = new Function('state', blk + `
+        const norm = v => { const l = Math.hypot(...v) || 1; return v.map(x => x / l); };
+        const dir = () => { const p = camPos(), t = camTgt();
+                            return norm([t[0]-p[0], t[1]-p[1], t[2]-p[2]]); };
+        return { camPos, camTgt, syncCameraMode, dir };`);
+      return { state, api: fn(state) };
+    };
+    const { state, api } = mk();
+    const eq = (a, b, t) => a.every((v, i) => Math.abs(v - b[i]) < t);
+
+    const p0 = api.camPos(), d0 = api.dir();
+    api.syncCameraMode(true); state.camMode = 1;
+    ok('entering flight holds the position', eq(p0, api.camPos(), 1e-9));
+    ok('entering flight holds the heading', eq(d0, api.dir(), 1e-6));
+    const p1 = api.camPos(), d1 = api.dir();
+    api.syncCameraMode(false); state.camMode = 0;
+    ok('leaving flight holds the position', eq(p1, api.camPos(), 1e-6));
+    ok('leaving flight holds the heading', eq(d1, api.dir(), 1e-6));
+
+    let worst = 0;
+    for(const [az, el, dd] of [[0.3,0.9,2],[2.9,-1.2,7],[-1.1,0,1.3],[5.0,1.4,20]]){
+      state.camMode = 0; state.camAzim = az; state.camElev = el; state.camDist = dd;
+      const a = api.camPos(), ad = api.dir();
+      api.syncCameraMode(true);  state.camMode = 1;
+      api.syncCameraMode(false); state.camMode = 0;
+      const b = api.camPos(), bd = api.dir();
+      worst = Math.max(worst, ...a.map((v, i) => Math.abs(v - b[i])),
+                              ...ad.map((v, i) => Math.abs(v - bd[i])));
+    }
+    ok('a round trip through flight is lossless', worst < 1e-9, worst.toExponential(1));
+
+    // pitch must stop short of vertical: at exactly +/-90 degrees the up vector is parallel to
+    // the view direction and the frame spins on its own
+    ok('pitch is clamped short of vertical', /Math\.min\(1\.55, state\.flyPitch/.test(js4));
+    ok('flight rises along WORLD up, not camera up', /if\(keys\['e'\]\) \{ dy \+= 1; \}/.test(js4));
+    ok('diagonal movement is normalised', /Math\.hypot\(dx, dy, dz\)/.test(js4));
+    ok('the wheel sets speed in flight', /state\.flySpeed = Math\.max\(0\.002/.test(js4));
+    ok('auto-spin applies to orbit only', /if\(!state\.camMode\) state\.camAzim \+= state\.autoSpin/.test(js4));
+    ok('orbit-only sliders are hidden in flight', /if\(only === 'orbit' && state\.camMode\) return;/.test(js4));
+
+    // "keep current camera" has to keep the WHOLE camera. Holding the orbit values while the mode
+    // snaps back, or holding the mode while the position jumps, are both worse than keeping none.
+    const camKeys = (js4.match(/const CAM_KEYS = \[([\s\S]*?)\];/) || [])[1] || '';
+    for(const k of ['camMode', 'flyX', 'flyY', 'flyZ', 'flyYaw', 'flyPitch', 'flySpeed'])
+      ok('keep-camera covers ' + k, camKeys.includes("'" + k + "'"));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

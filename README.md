@@ -55,6 +55,35 @@ tools/
   validate.py       the three gates, run against real GL headlessly
 ```
 
+## Camera
+
+Two modes, and switching between them does not move the picture.
+
+**Orbit a target** swings around `tgtX/Y/Z` rather than the origin, because imported flames are
+rarely centred there — a Jerusalem cube occupies [0,1]^3 and would sit off to one side otherwise.
+
+**Free flight** goes where orbit cannot: inside a structure that is more interesting from within
+than from outside. W and S along the view, A and D strafe, Q and E down and up along **world** up
+— tumbling while you climb is disorienting and nobody wants it. Drag to look. Shift for a quarter
+speed.
+
+The **wheel sets speed** in flight rather than distance. There is no distance to change, and speed
+is what you actually reach for: an imported attractor can span 0.03 units or 30, so any fixed rate
+is useless at one end or the other.
+
+**The handover is exact.** Entering flight takes the orbit camera's position and heading; leaving
+it places the target ahead along the current heading at the orbit distance. A round trip through
+flight returns the view to within 4e-16, which is asserted — the point of having both modes is to
+compose in one and move in the other, and a jump on the switch would make that useless.
+
+Pitch stops just short of vertical. At exactly +/-90 degrees the up vector is parallel to the view
+direction and the frame spins on its own.
+
+Auto-spin, distance and the target sliders only mean something in orbit, so they are hidden in
+flight rather than shown doing nothing. "Keep current camera" covers the flight position and the
+MODE as well — holding the orbit values while the mode snaps back would be worse than keeping
+nothing.
+
 ## Interface
 
 A top bar and two rails.
