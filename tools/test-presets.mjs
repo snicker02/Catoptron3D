@@ -994,6 +994,143 @@ console.log('preset format v' + PRESET_VERSION + '\n');
       ok('keep-camera covers ' + k, camKeys.includes("'" + k + "'"));
   }
 
+  // TILED EXPORT. The image is rendered in tiles and composited, so the WebGL drawing buffer is
+  // never bigger than one tile. The tiles must line up EXACTLY: the shader has to cast the rays it
+  // would have cast at full resolution, which means uRes reports the full image and uTileOrigin
+  // says where the tile sits in it. Verified elsewhere as pixel-identical to a single pass.
+  {
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const base = { stack: [{ type: 8, p: [0.42] }], prim: 0, iters: 6, steps: 128,
+                   ao: false, shadow: false, glow: false, bounces: 0 };
+    const a = assemble(base), b = assemble({ ...base, aa: 2 });
+    ok('the primary ray takes the tile origin',
+       a.includes('gl_FragCoord.xy + uTileOrigin - uRes * 0.5'));
+    ok('and so do the supersampled rays',
+       b.includes('+ off + uTileOrigin - uRes * 0.5'));
+    ok('tiling is a uniform, not a program variant', signature(base) === signature(base));
+
+    const js5 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    ok('uRes reports the FULL image while tiling',
+       /u2\(L, 'uRes', tileFullW \|\| w, tileFullH \|\| h\)/.test(js5));
+    ok('the tile origin is uploaded', /u2\(L, 'uTileOrigin', tileOx, tileOy\)/.test(js5));
+    // GL counts rows from the bottom, the 2D canvas from the top; get this wrong and the strips
+    // come out in the wrong order, which looks like corruption rather than a flip
+    ok('the tile origin is expressed in GL row order',
+       /tileOy = sh - \(ty \+ 1\) \* th/.test(js5));
+    ok('rows are flipped into canvas order', /const src = \(th - 1 - y\) \* tw \* 4/.test(js5));
+    ok('the loop yields between tiles', /await nextFrame\(\)/.test(js5));
+    ok('tile state is cleared after the export',
+       /tileFullW = 0; tileFullH = 0; tileOx = 0; tileOy = 0;/.test(js5));
+    ok('the composite canvas is size-checked before rendering',
+       /out\.width !== sw \|\| out\.height !== sh/.test(js5));
+    ok('encoding reads the composite, not the GL canvas', /out\.toBlob\(async blob/.test(js5));
+
+    // the larger sizes only make sense because of tiling
+    const sizes = (js5.match(/const EXPORT_SIZES = \[([\s\S]*?)\];/) || [])[1] || '';
+    ok('the export list reaches 8640 px', sizes.includes('8640'));
+  }
+
+  // KEYFRAMES. The load-bearing rule is that BAKED parameters must STEP rather than blend.
+  // Interpolating one asks for a different shader every frame, which is a recompile per frame —
+  // a stutter, not an animation. Angles are the other special case: azimuth wraps, so a naive
+  // lerp from +170 to -170 degrees takes the long way round and the camera spins backwards
+  // through the whole scene.
+  {
+    const anim = await import(new URL('../engine/anim.js', import.meta.url).href);
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const mainSrc2 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const DEF2 = (new Function(
+      mainSrc2.slice(mainSrc2.indexOf('const state = {'), mainSrc2.indexOf('\n};')) +
+      '\n};\nreturn state;'))();
+    const mk = over => capture({ ...DEF2, ...over,
+      stack: [{ type: 8, p: [0.42], o: [0,0,0], r: [0,0,0] },
+              { type: 5, p: [1.0], o: [0,0,0], r: [0,0,0] }], flame: null }, DEF2, OPS, 'k');
+
+    // EVERY field that reaches the shader signature must be in STEP_KEYS, or it would be blended
+    const sigSrc = readFileSync(new URL('../engine/assemble.js', import.meta.url), 'utf8');
+    const sigBody = sigSrc.slice(sigSrc.indexOf('export function signature('),
+                                 sigSrc.indexOf('export function assemble('));
+    // Two kinds of baked parameter, and only one of them has to step.
+    //
+    //   VALUE gate:  `c.iters`        — the literal itself is compiled in. Blending it asks for a
+    //                                   different program every frame, so it MUST step.
+    //   BOOLEAN gate: `c.ao ? 1 : 0`  — only zero versus non-zero reaches the shader. Fading one
+    //                                   crosses the threshold ONCE, which is a single swap, and
+    //                                   fading it smoothly is the behaviour you want.
+    //
+    // Conflating the two would either churn programs or refuse to fade ambient occlusion.
+    const gated = new Set((sigBody.match(/c\.([A-Za-z][A-Za-z0-9]*)\s*(\?|>)/g) || [])
+      .map(x => x.slice(2).replace(/\s*(\?|>)$/, '')));
+    const baked = [...new Set((sigBody.match(/c\.([A-Za-z][A-Za-z0-9]*)/g) || [])
+      .map(x => x.slice(2)))]
+      .filter(k => k in DEF2 && k !== 'stack' && !gated.has(k));
+    const unstepped = baked.filter(k => !anim.STEP_KEYS.has(k));
+    ok('every VALUE-baked parameter steps rather than blends',
+       unstepped.length === 0, unstepped.join(', '));
+    ok('and the boolean-gated ones are left free to fade',
+       ['ao', 'glow', 'transp', 'disp'].every(k => !anim.STEP_KEYS.has(k)));
+
+    // a fade of a gated parameter must cross its threshold once, not repeatedly
+    const g0 = { t: 0, preset: mk({ ao: 0 }) }, g1 = { t: 1, preset: mk({ ao: 1 }) };
+    let flips = 0, was = null;
+    for(let i = 0; i <= 30; i++){
+      const on = anim.sampleTimeline([g0, g1], i / 30, apply, DEF2, OPS, {}).ao > 0;
+      if(was !== null && on !== was) flips++;
+      was = on;
+    }
+    ok('fading a gated parameter swaps the program once at most', flips <= 1, flips + ' flips');
+
+    // and prove it end to end: sampling a move that changes baked params must not churn programs
+    const k0 = { t: 0, preset: mk({ camDist: 5, iters: 8,  prim: 0, exposure: 1.0, bounces: 0 }) };
+    const k1 = { t: 1, preset: mk({ camDist: 9, iters: 16, prim: 3, exposure: 1.6, bounces: 2 }) };
+    const sigOf = st => signature({ stack: st.stack, prim: st.prim, primStyle: st.primStyle,
+      iters: st.iters, steps: st.steps, ao: st.ao > 0, shadow: st.shadow > 0, glow: st.glow > 0,
+      bounces: st.bounces, seamSurf: st.seamSurf > 0.5, feedback: st.feedback, aa: 1, flameN: 0 });
+    const seen = new Set();
+    for(let i = 0; i <= 40; i++)
+      seen.add(sigOf(anim.sampleTimeline([k0, k1], i / 40, apply, DEF2, OPS, { easing: 1 })));
+    ok('a 41-frame sample uses only 2 programs', seen.size === 2, seen.size + '');
+
+    const mid = anim.sampleTimeline([k0, k1], 0.5, apply, DEF2, OPS, {});
+    ok('baked iterations hold at the outgoing value', mid.iters === 8, String(mid.iters));
+    ok('continuous values do interpolate', Math.abs(mid.exposure - 1.3) < 1e-6,
+       mid.exposure.toFixed(3));
+    const end = anim.sampleTimeline([k0, k1], 1, apply, DEF2, OPS, {});
+    ok('and the far key is reached exactly', end.iters === 16 && Math.abs(end.exposure - 1.6) < 1e-9);
+
+    // angles take the short way: measure the SWEPT angle, ignoring 2pi representation wraps
+    const wrap = d => { d %= 2 * Math.PI; if(d > Math.PI) d -= 2 * Math.PI;
+                        if(d < -Math.PI) d += 2 * Math.PI; return d; };
+    const swept = (a, b) => {
+      const ks = [{ t: 0, preset: mk({ camAzim: a }) }, { t: 1, preset: mk({ camAzim: b }) }];
+      let sum = 0, prev = a;
+      for(let i = 1; i <= 120; i++){
+        const v = anim.sampleTimeline(ks, i / 120, apply, DEF2, OPS, {}).camAzim;
+        sum += Math.abs(wrap(v - prev)); prev = v;
+      }
+      return sum * 180 / Math.PI;
+    };
+    ok('a wrap-around turn takes the short way', Math.abs(swept(2.9671, -2.9671) - 20) < 1.5,
+       swept(2.9671, -2.9671).toFixed(1) + ' deg, short way is 20');
+    ok('an ordinary turn is unaffected', Math.abs(swept(0, Math.PI * 0.9) - 162) < 1.5);
+
+    // easings are well behaved at the ends, or keys would not be hit exactly
+    ok('every easing hits 0 and 1 exactly',
+       anim.EASINGS.every((_, i) => anim.ease(i, 0) === 0 && anim.ease(i, 1) === 1));
+
+    // structural changes step rather than producing nonsense
+    const diffStack = { t: 1, preset: capture({ ...DEF2,
+      stack: [{ type: 13, p: [2,2,2], o: [0,0,0], r: [0,0,0] }], flame: null }, DEF2, OPS, 'z') };
+    const sm = anim.sampleTimeline([k0, diffStack], 0.5, apply, DEF2, OPS, {});
+    ok('a stack of a different shape steps instead of blending',
+       sm.stack.length === 2 && sm.stack[0].type === 8);
+
+    ok('a single key samples as itself',
+       anim.sampleTimeline([k0], 0.7, apply, DEF2, OPS, {}).iters === 8);
+    ok('an empty timeline samples as nothing',
+       anim.sampleTimeline([], 0.5, apply, DEF2, OPS, {}) === null);
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
@@ -1241,7 +1378,11 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     // state[key] inside a loop, so there is no literal state.key = to search for), or if a
     // panel builder writes state.key directly.
     const groups = js.slice(js.indexOf('const GROUPS = ['), js.indexOf('const RIGHT_GROUPS'));
-    const builders = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function section('));
+    const builders = js.slice(js.indexOf('function buildGlobals()'), js.indexOf('function section('))
+      // the timeline builds its own controls outside the group panels, and they are still
+      // controls — a key reachable from a widget anywhere counts
+      + js.slice(js.indexOf('function buildTimelineOpts()'), js.indexOf('function refreshPresetList()'))
+      + js.slice(js.indexOf('function addKey()'), js.indexOf('function renderTimeline()'));
     const missing = Object.keys(st).filter(k =>
       !NO_WIDGET.has(k) && !groups.includes("'" + k + "'") &&
       !builders.includes('state.' + k + ' ='));

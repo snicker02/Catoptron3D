@@ -866,7 +866,7 @@ void main(){
 
   float glowTot = 0.0;
   vec3 col = vec3(0.0);
-  vec2 uv = (gl_FragCoord.xy - uRes * 0.5) / uRes.y;
+  vec2 uv = (gl_FragCoord.xy + uTileOrigin - uRes * 0.5) / uRes.y;
 ${cfg.aa > 1 ? `
   // ANTI-ALIASING by supersampling. A distance-estimated fractal has detail far below one pixel,
   // so a single ray per pixel does not merely produce hard edges — it SPARKLES, because which
@@ -880,7 +880,7 @@ ${cfg.aa > 1 ? `
   for(int sy = 0; sy < ${cfg.aa}; sy++){
     for(int sx = 0; sx < ${cfg.aa}; sx++){
       vec2 off = (vec2(float(sx), float(sy)) + 0.5) / AA - 0.5;
-      vec2 uvs = (gl_FragCoord.xy + off - uRes * 0.5) / uRes.y;
+      vec2 uvs = (gl_FragCoord.xy + off + uTileOrigin - uRes * 0.5) / uRes.y;
       vec3 rd = normalize(rgt * uvs.x + upv * uvs.y + fwd * uFov);
       float g = 0.0;
 ${cfg.disp ? `      vec3 c3 = vec3(0.0);

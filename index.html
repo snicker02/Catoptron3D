@@ -205,6 +205,9 @@ button.xa.on{background:var(--ice1);border-color:var(--ice1)}
   color:var(--txt);padding:5px 7px;font-family:var(--mono);font-size:10.5px;outline:none;
 }
 .tin::placeholder{color:var(--note)}
+.tlkeys{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 2px}
+.tlkeys button{font-family:var(--mono);font-size:10px;padding:2px 6px}
+.tlkeys button.at{outline:1px solid var(--accent)}
 /* Notes fold away. They matter when something is wrong and are clutter the rest of the time. */
 details.notewrap{margin:4px 0 8px}
 details.notewrap>summary{
@@ -321,6 +324,22 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
     <div id="savelink" class="savelink"></div>
     <p class="note">A photo has no plane to fold in 3D, so it lands as the environment (seen in
     every reflection) or as a triplanar surface texture. Sliders are in the Image group below.</p>
+  </div>
+
+  <div class="group">
+    <h2>Timeline</h2>
+    <div class="row">
+      <button id="tlAdd">+ key here</button>
+      <button id="tlPlay">play</button>
+      <button id="tlStop">stop</button>
+    </div>
+    <div class="row" style="margin-top:5px">
+      <button id="tlClear">clear</button>
+      <button id="tlFirst">|&lt;</button>
+      <button id="tlLast">&gt;|</button>
+    </div>
+    <div id="tlKeys" class="tlkeys"></div>
+    <div id="tlOpts"></div>
   </div>
 
   <div class="group">

@@ -14,6 +14,7 @@ import { capture, apply as applyPreset, encode, decode, parseAny,
          PRESET_VERSION } from './engine/preset.js';
 import { FACTORY } from './engine/factory.js';
 import { buildField } from './engine/voxel.js';
+import { sampleTimeline, EASINGS, STEP_KEYS } from './engine/anim.js';
 import { inverseFloor, projectedScale } from './engine/flame.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
@@ -55,6 +56,7 @@ const state = {
   aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
   bestDepth: 0, scaleCap: 0,
   boxTrim: 1.0,
+  animTime: 0, animEase: 1, animFlame: 0, animCamera: 1,  animLoop: 1,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
@@ -367,7 +369,8 @@ function renderScene(w, h){
   gl.bindVertexArray(vao);
   gl.viewport(0, 0, w, h);
 
-  u2(L, 'uRes', w, h);
+  u2(L, 'uRes', tileFullW || w, tileFullH || h);
+  u2(L, 'uTileOrigin', tileOx, tileOy);
   u1(L, 'uTime', animTime);
 
   const cp = camPos();
@@ -529,6 +532,7 @@ const STARTERS = {
            aa: 1, aaExport: 2, idleRefine: 0, flameVoxel: 0, voxelGrid: 128, flameBeam: 1,
   bestDepth: 0, scaleCap: 0,
   boxTrim: 1.0,
+  animTime: 0, animEase: 1, animFlame: 0, animCamera: 1,  animLoop: 1,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, eps: 0.0009, maxDist: 40,
            bounces: 0, reflect: 0.55, fresnel: 0.6, metal: 0,
@@ -798,6 +802,51 @@ function refreshFlameLabel(){
   e.style.color = w ? 'var(--warn1)' : '';
 }
 
+
+/* ── keyframes ──────────────────────────────────────────────────────────────────────────────
+   Each key is a full preset plus a time, so the format, the loader and its tolerance are reused
+   rather than reinvented — and a saved preset can carry the whole animation.
+
+   Playback samples the timeline and assigns the result to state. Baked parameters STEP, because
+   interpolating one asks for a new shader every frame; that is checked in engine/anim.js and
+   asserted in the tests. Sampling happens in the frame loop only while playing, so a still
+   viewport costs nothing.                                                                      */
+let timeline = [];                     // [{ t, preset }]
+let playing = false, playTime = 0, playFrom = 0;
+
+function tlSorted(){ return timeline.slice().sort((a, b) => a.t - b.t); }
+function tlDuration(){ const k = tlSorted(); return k.length ? k[k.length - 1].t : 0; }
+
+function addKey(){
+  const t = +state.animTime.toFixed(3);
+  const preset = capture(state, DEFAULT_STATE, OPS, 'key');
+  const at = timeline.findIndex(k => Math.abs(k.t - t) < 1e-4);
+  if(at >= 0) timeline[at] = { t, preset };            // replace, so re-keying a time works
+  else timeline.push({ t, preset });
+  renderTimeline();
+  setStat((at >= 0 ? 'replaced' : 'added') + ' key at ' + t.toFixed(2) + ' s');
+}
+
+function delKeyAt(t){
+  timeline = timeline.filter(k => Math.abs(k.t - t) > 1e-4);
+  renderTimeline();
+}
+
+function gotoTime(t){
+  state.animTime = t;
+  const st = sampleTimeline(timeline, t, applyPreset, DEFAULT_STATE, OPS,
+                            { easing: state.animEase, blendFlame: !!state.animFlame });
+  if(!st) return;
+  const keepKeys = state.animCamera ? [] : CAM_KEYS;   // optionally leave the camera alone
+  for(const k in st){
+    if(k === 'stack' || k === 'flame' || k === 'animTime') continue;
+    if(keepKeys.includes(k)) continue;
+    if(typeof st[k] === 'number') state[k] = st[k];
+  }
+  state.stack = st.stack;
+  state.flame = st.flame || null;
+  renderEpoch++;
+}
 
 /* ── voxel field ────────────────────────────────────────────────────────────────────────────
    The flame estimator has to guess which map's image a point came from; the chaos game does not
@@ -1390,7 +1439,7 @@ function lsWrite(obj){
   catch(e){ setStat('could not save \u2014 storage unavailable'); return false; }
 }
 
-function currentPreset(name){ return capture(state, DEFAULT_STATE, OPS, name); }
+function currentPreset(name){ return withTimeline(capture(state, DEFAULT_STATE, OPS, name)); }
 
 // KEEP CAMERA lets a geometry preset be viewed from where you already are. The camera is the one
 // part of a preset you are most likely to have already set by hand, and reloading a preset to
@@ -1403,6 +1452,7 @@ const CAM_KEYS = ['camDist', 'camAzim', 'camElev', 'fov', 'tgtX', 'tgtY', 'tgtZ'
 
 function loadPreset(p, keepCamera){
   const r = applyPreset(p, DEFAULT_STATE, OPS);
+  adoptTimeline(p);
   if(keepCamera) CAM_KEYS.forEach(k => { r.state[k] = state[k]; });
   Object.assign(state, r.state);
   state.stack = r.stack;
@@ -1419,6 +1469,70 @@ function loadPreset(p, keepCamera){
   } else {
     setStat('loaded' + (p.name ? ' \u201c' + p.name + '\u201d' : ''));
   }
+}
+
+function renderTimeline(){
+  const host = $('tlKeys');
+  if(!host) return;
+  host.innerHTML = '';
+  const ks = tlSorted();
+  if(!ks.length){
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = 'No keys. Set up a view, then "+ key here" \u2014 each key stores the WHOLE '
+      + 'state, so anything you can change is animatable. Move the time, change things, key '
+      + 'again. Baked settings (iterations, primitive, bounces) STEP at the key rather than '
+      + 'blending, because interpolating one would rebuild the shader every frame.';
+    host.append(p);
+    collapseNotes(host);
+    return;
+  }
+  ks.forEach(k => {
+    const b = document.createElement('button');
+    b.textContent = k.t.toFixed(2) + 's';
+    if(Math.abs(k.t - state.animTime) < 1e-3) b.classList.add('at');
+    b.title = 'click to go there, shift-click to delete';
+    b.onclick = e => {
+      if(e.shiftKey){ delKeyAt(k.t); setStat('deleted key at ' + k.t.toFixed(2) + ' s'); return; }
+      gotoTime(k.t); syncTimelineUI(); pushHistory();
+    };
+    host.append(b);
+  });
+}
+
+function syncTimelineUI(){
+  const b = $('tlPlay');
+  if(b) b.textContent = playing ? 'pause' : 'play';
+  renderTimeline();
+  const o = $('tlOpts');
+  if(o && o.dataset.t !== String(Math.round(state.animTime * 100))){
+    o.dataset.t = String(Math.round(state.animTime * 100));
+  }
+}
+
+function buildTimelineOpts(){
+  const o = $('tlOpts');
+  if(!o) return;
+  o.innerHTML = '';
+  o.append(mkSlider('Time', 0, Math.max(tlDuration(), 1), 0.01, state.animTime,
+                    v => { gotoTime(v); renderTimeline(); }, 2));
+  o.append(mkSelect('Easing', EASINGS, state.animEase, v => { state.animEase = v; }, false));
+  o.append(mkSelect('Loop', ['once', 'loop'], state.animLoop ? 1 : 0,
+                    v => { state.animLoop = v; }, false));
+  o.append(mkSelect('Animate camera', ['no \u2014 keep the live camera', 'yes'],
+                    state.animCamera ? 1 : 0, v => { state.animCamera = v; }, false));
+  o.append(mkSelect('Blend the flame', ['no \u2014 step at keys', 'yes \u2014 morph transforms'],
+                    state.animFlame ? 1 : 0, v => { state.animFlame = v; }, false));
+  const n = document.createElement('p');
+  n.className = 'note';
+  n.textContent = 'Blending the flame morphs the transforms between keys, which is the good bit '
+    + '\u2014 but it re-resolves the attractor every frame, and that is the expensive part of a '
+    + 'flame (hulls, image boxes, ambiguity). Expect it to cost more than the render does. It '
+    + 'only blends when the two keys have the same transform COUNT, the same variations and the '
+    + 'same selection rule; anything else changes the shader or the meaning of the numbers, so '
+    + 'it steps instead.';
+  o.append(n);
+  collapseNotes(o);
 }
 
 function refreshPresetList(){
@@ -1461,6 +1575,32 @@ function selectedPreset(){
     return { name: n, preset: lsRead()[n], factory: false };
   }
   return { name: '', preset: null, factory: false };
+}
+
+// A preset carries its timeline under `a`. An animation is part of a look, and saving the look
+// without it would mean rebuilding the keys by hand every time.
+function withTimeline(p){
+  const out = { ...p };
+  if(timeline.length) out.a = { ease: state.animEase, loop: state.animLoop ? 1 : 0,
+                                flame: state.animFlame ? 1 : 0, cam: state.animCamera ? 1 : 0,
+                                keys: tlSorted().map(k => ({ t: k.t, p: k.preset })) };
+  return out;
+}
+
+function adoptTimeline(p){
+  timeline = [];
+  const a = p && p.a;
+  if(a && Array.isArray(a.keys)){
+    timeline = a.keys.filter(k => k && k.p && Array.isArray(k.p.k))
+                     .map(k => ({ t: +k.t || 0, preset: k.p }));
+    if(a.ease !== undefined)  state.animEase   = a.ease | 0;
+    if(a.loop !== undefined)  state.animLoop   = a.loop | 0;
+    if(a.flame !== undefined) state.animFlame  = a.flame | 0;
+    if(a.cam !== undefined)   state.animCamera = a.cam | 0;
+  }
+  playing = false;
+  renderTimeline();
+  buildTimelineOpts();
 }
 
 function savePreset(){
@@ -2196,6 +2336,24 @@ function buildPanel(){
   renderXaos();
   refreshFlameLabel();
 
+  $('tlAdd').onclick   = () => { addKey(); buildTimelineOpts(); pushHistory(); };
+  $('tlPlay').onclick  = () => {
+    if(!timeline.length){ setStat('no keys to play'); return; }
+    playing = !playing;
+    if(playing){ playFrom = state.animTime >= tlDuration() ? 0 : state.animTime; playTime = 0; }
+    syncTimelineUI();
+    bumpInteract();
+  };
+  $('tlStop').onclick  = () => { playing = false; gotoTime(0); syncTimelineUI(); };
+  $('tlClear').onclick = () => {
+    if(timeline.length && !confirm('Delete all ' + timeline.length + ' keys?')) return;
+    timeline = []; playing = false; renderTimeline(); buildTimelineOpts();
+  };
+  $('tlFirst').onclick = () => { const k = tlSorted()[0]; if(k){ gotoTime(k.t); syncTimelineUI(); } };
+  $('tlLast').onclick  = () => { const k = tlSorted().pop(); if(k){ gotoTime(k.t); syncTimelineUI(); } };
+  renderTimeline();
+  buildTimelineOpts();
+
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {
     const sel = selectedPreset();
@@ -2340,6 +2498,10 @@ function syncSliderDisplay(){ /* sliders are one-way; camera keys/wheel don't wr
 /* ── loop ──────────────────────────────────────────────────────────────────────────────── */
 let W = 0, H = 0, animTime = 0, lastT = 0, fpsArr = [];
 
+// Set while a tiled export is in flight: uRes reports the FULL image and uTileOrigin says where
+// this tile sits in it, so the shader casts the rays it would have cast at full size.
+let tileFullW = 0, tileFullH = 0, tileOx = 0, tileOy = 0;
+
 /* ── redraw on demand ───────────────────────────────────────────────────────────────────────
    The loop used to call renderScene every animation frame whether or not anything had changed,
    so a completely static image held the GPU at full load indefinitely. On a heavy IFS that is
@@ -2436,6 +2598,14 @@ function frame(now){
     cv.style.top  = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
   }
 
+  if(playing){
+    playTime += dt;
+    const dur = Math.max(tlDuration(), 0.001);
+    let t = playFrom + playTime;
+    if(t > dur){ t = state.animLoop ? (t % dur) : dur; if(!state.animLoop) playing = false; }
+    gotoTime(t);
+    syncTimelineUI();
+  }
   if(state.flameVoxel) ensureVoxField();
 
   const key = renderKey();
@@ -2565,10 +2735,13 @@ function displaySize(){
   return [Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h))];
 }
 
+// Sizes past 2880 only became possible with tiled export: the drawing buffer no longer has to be
+// the size of the image, so the ceiling is the 2D composite canvas rather than WebGL.
 const EXPORT_SIZES = [
   ['\u00d71 view',   1], ['\u00d72 view', 2], ['\u00d74 view', 4],
   ['1080 px tall', -1080], ['1440 px tall', -1440],
-  ['2160 px tall', -2160], ['2880 px tall', -2880]
+  ['2160 px tall', -2160], ['2880 px tall', -2880],
+  ['4320 px tall', -4320], ['5760 px tall', -5760], ['8640 px tall', -8640]
 ];
 
 function exportDims(){
@@ -2600,7 +2773,11 @@ function exportDims(){
 
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const MAX_EXPORT_PX  = IS_IOS ? 16.0e6 : 80e6;
+// With tiled export the WebGL drawing buffer is never bigger than one tile, so these now bound
+// the 2D COMPOSITE canvas rather than anything in GL. That is a different and looser limit — but
+// it is paid in memory: the composite is 4 bytes a pixel, so 140 Mpx is about 560 MB live while
+// encoding. Desktop can take it; iOS is left where it was, because it cannot.
+const MAX_EXPORT_PX  = IS_IOS ? 16.0e6 : 140e6;
 const MAX_EXPORT_DIM = IS_IOS ? 4096   : 16384;
 
 function fitExport(w, h){
@@ -2622,6 +2799,23 @@ function offerSaveLink(url, name){
   host.append(a);
 }
 
+// TILED EXPORT.
+//
+// The old path resized the WebGL canvas to the full export size and drew once. That caps the
+// image at whatever drawing buffer the browser will allocate — well under 16K — and it was also
+// the size that made toBlob fail outright.
+//
+// Now the drawing buffer stays small and the image is rendered in tiles, each one reading back
+// and being written into a 2D canvas at full size. The shader casts the rays it would have cast
+// at full resolution: uRes reports the FULL image and uTileOrigin says where the tile sits in it,
+// so the tiles line up exactly rather than each being its own little picture.
+//
+// Between tiles it yields. A long synchronous loop would freeze the tab, which is the bug that
+// was just removed from the program wait, and there is no reason to reintroduce it here.
+const TILE_MAX = 1024;
+
+function nextFrame(){ return new Promise(r => requestAnimationFrame(r)); }
+
 async function savePNG(){
   if(!cur){ setStat('shader still building\u2026'); return; }
   if(exporting){ setStat('already exporting\u2026'); return; }
@@ -2629,32 +2823,68 @@ async function savePNG(){
   const [sw, sh] = exportDims();
   const pw = cv.width, ph = cv.height;
 
-  // Claim the canvas BEFORE the first await. The frame loop runs while we wait for the program,
-  // and it would otherwise resize the canvas back to the viewport mid-export.
-  exporting = true;
-  cv.width = sw; cv.height = sh;
-  if(cv.width !== sw || cv.height !== sh){          // allocation refused outright
-    cv.width = pw; cv.height = ph; W = 0; H = 0;
-    exporting = false;
-    setStat('export size refused by the browser');
-    return;
-  }
-  setStat('rendering ' + sw + '\u00d7' + sh + '\u2026');
-  await withSamples(state.aaExport, (n, ok) => {
-    if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
-    renderScene(cv.width, cv.height);
-  });
-  if(gl.isContextLost()){
-    exporting = false;
-    setStat('context lost during export \u2014 reload and try a smaller window');
+  // The composite target is an ordinary 2D canvas, and browsers cap those by AREA as well as by
+  // side. Checking first turns a silent blank export into a message.
+  let out, octx;
+  try {
+    out = document.createElement('canvas');
+    out.width = sw; out.height = sh;
+    octx = out.getContext('2d', { willReadFrequently: false });
+  } catch(e){ octx = null; }
+  if(!octx || out.width !== sw || out.height !== sh){
+    setStat(sw + '\u00d7' + sh + ' is more than this browser will allocate \u2014 try smaller');
     return;
   }
 
-  const outW = cv.width, outH = cv.height;
+  exporting = true;
+  const tw = Math.min(TILE_MAX, sw), th = Math.min(TILE_MAX, sh);
+  cv.width = tw; cv.height = th;
+  if(cv.width !== tw || cv.height !== th){
+    cv.width = pw; cv.height = ph; W = 0; H = 0;
+    exporting = false;
+    setStat('tile size refused by the browser');
+    return;
+  }
+
+  const cols = Math.ceil(sw / tw), rows = Math.ceil(sh / th);
+  const total = cols * rows;
+  let failed = false;
+
+  await withSamples(state.aaExport, async (n, ok) => {
+    if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
+    const buf = new Uint8ClampedArray(tw * th * 4);
+    const flip = new Uint8ClampedArray(tw * th * 4);
+    for(let ty = 0; ty < rows; ty++){
+      for(let tx = 0; tx < cols; tx++){
+        if(gl.isContextLost()){ failed = true; return; }
+        tileFullW = sw; tileFullH = sh;
+        tileOx = tx * tw;
+        // GL counts rows from the BOTTOM and the 2D canvas from the top, so the tile's origin
+        // has to be expressed in GL's frame or the strips come out in the wrong order.
+        tileOy = sh - (ty + 1) * th;
+        renderScene(tw, th);
+        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        for(let y = 0; y < th; y++){                 // flip rows into the 2D canvas' order
+          const src = (th - 1 - y) * tw * 4;
+          flip.set(buf.subarray(src, src + tw * 4), y * tw * 4);
+        }
+        octx.putImageData(new ImageData(flip, tw, th), tx * tw, ty * th);
+        const done = ty * cols + tx + 1;
+        setStat('rendering tile ' + done + ' of ' + total + ' \u00b7 ' + sw + '\u00d7' + sh);
+        await nextFrame();                            // yield, so the tab stays alive
+      }
+    }
+  });
+  tileFullW = 0; tileFullH = 0; tileOx = 0; tileOy = 0;
+
+  if(failed || gl.isContextLost()){
+    cv.width = pw; cv.height = ph; W = 0; H = 0; exporting = false;
+    setStat('context lost during export \u2014 try a smaller export size');
+    return;
+  }
+
+  const outW = sw, outH = sh;
   const name = 'catoptron3d_' + outW + 'x' + outH + '_' + Date.now() + '.png';
-  // Restore exactly once, however the export ends. If toBlob never calls back — which a large
-  // enough canvas can cause — the lock would otherwise stay held and the viewport would never
-  // draw again, which looks identical to a frozen program.
   let restored = false;
   const restore = () => {
     if(restored) return;
@@ -2665,16 +2895,16 @@ async function savePNG(){
     if(restored) return;
     restore();
     setStat('encoding gave up \u2014 try a smaller export size');
-  }, 120000);
+  }, 180000);
 
-  if(!cv.toBlob){                                    // very old browser
+  if(!out.toBlob){
     restore();
     setStat('this browser cannot export PNG');
     return;
   }
 
   setStat('encoding ' + outW + '\u00d7' + outH + '\u2026');
-  cv.toBlob(async blob => {
+  out.toBlob(async blob => {
     clearTimeout(watchdog);
     restore();
     if(!blob){ setStat('export failed \u2014 try a smaller window'); return; }

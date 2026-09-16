@@ -178,6 +178,40 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+### Tiled export
+
+The export used to resize the WebGL canvas to the full image and draw once. That caps the result
+at whatever drawing buffer the browser will allocate — well short of 16K — and it was also the
+size at which `toBlob` failed outright.
+
+The drawing buffer now stays at one tile. The image is rendered in **1024 px tiles**, each read
+back and written into a 2D canvas at full size, and encoded once at the end.
+
+The tiles line up because the shader casts the rays it would have cast at full resolution: `uRes`
+reports the FULL image and `uTileOrigin` says where the tile sits inside it. A 4x3 tiled render is
+**pixel-identical** to the single-pass render — zero differing pixels, which is the assertion worth
+having, since a half-pixel error per tile would show as seams.
+
+Two things that are easy to get wrong and are pinned by tests. GL counts rows from the BOTTOM and
+the 2D canvas from the top, so the tile origin is expressed in GL's frame — get it wrong and the
+strips arrive in the wrong order, which reads as corruption rather than as a flip. And the loop
+**yields between tiles**: a long synchronous loop would freeze the tab, which is precisely the bug
+that had just been removed from the program wait.
+
+Sizes past 2880 px only became possible with this, since the ceiling is now the 2D composite
+rather than WebGL:
+
+| setting | pixels | composite | tiles |
+|---|---|---|---|
+| 2160 px tall | 3840x2160 | 32 MB | 12 |
+| 4320 px tall | 7680x4320 | 127 MB | 40 |
+| 5760 px tall | 10240x5760 | 225 MB | 60 |
+| **8640 px tall** | **15360x8640** | **506 MB** | **135** |
+
+That memory is live while encoding, which is why the desktop cap is 140 Mpx and iOS is left at 16.
+The composite is size-checked before any rendering starts, so an over-large request says so
+instead of producing a blank file.
+
 ### The export must not busy-wait
 
 Saving a PNG froze the browser and produced no file. The export waited for the supersampled
@@ -1187,6 +1221,56 @@ imported general form; the import earns its place on flames you cannot express a
 Inverse matrices and operator norms are computed in double precision at import time and baked
 into the shader as constants, so the estimator divides by a true operator norm even when a map
 is a shear rather than a similarity. Flames are carried inside presets.
+
+## Keyframes
+
+A key is a full preset plus a time, so the format, the loader and its tolerance are reused rather
+than reinvented — and a saved preset carries its whole animation under `a`.
+
+Set up a view, press **+ key here**, move the time, change things, key again. Click a key to jump
+to it, shift-click to delete. Anything in the state is animatable.
+
+### What blends and what steps
+
+The load-bearing rule: **value-baked parameters step.** Iterations, primitive, march steps,
+bounces, search width and the rest compile into the shader as literals, so blending one asks for a
+different program every frame — a recompile per frame, which is a stutter, not an animation. They
+hold the outgoing key's value until the next key is reached.
+
+The distinction that matters, and that a test enforces separately:
+
+| kind | in the signature as | behaviour |
+|---|---|---|
+| **value-baked** — iterations, primitive, bounces | `c.iters` | **steps** |
+| **boolean-gated** — AO, glow, transparency, dispersion | `c.ao ? 1 : 0` | **fades** |
+
+A gated parameter only tells the shader zero versus non-zero, so fading one crosses its threshold
+ONCE — a single swap, asserted — and fading ambient occlusion smoothly is exactly what you want.
+Treating the two alike would either churn programs or refuse to fade AO for no reason.
+
+Verified end to end: a 41-frame sample across a move that changes iterations, primitive and
+bounces uses **two programs**, one swap at the far key.
+
+### Angles take the short way
+
+Azimuth and yaw wrap. A move from +170 to -170 degrees is 20 degrees one way and 340 the other,
+and a naive lerp takes the long one — the camera spins backwards through the entire scene. Those
+keys interpolate along the shortest arc. Measured as SWEPT angle rather than raw difference,
+because the endpoints legitimately differ by 2pi without the camera moving at all.
+
+### Structure steps too
+
+Two fold stacks blend only if they have the same shape: same length, same operator types. A blend
+between two different operators is not a fold of anything. Discrete parameters INSIDE an operator
+are baked exactly like discrete settings, so those step as well.
+
+Flames blend only when the transform count, the variations and the selection rule all match —
+anything else changes the shader or the meaning of the numbers. **Blend the flame** is off by
+default because it re-resolves the attractor every frame, and resolving is the expensive part of a
+flame: hulls, image boxes and the ambiguity measure. Expect it to cost more than the render.
+
+**Animate camera** can be turned off, so a keyed sequence of geometry can be watched from wherever
+you happen to be standing.
 
 ## Presets
 

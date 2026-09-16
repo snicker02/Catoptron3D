@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.53.0-fly-camera';
+export const BUILD = '0.55.0-keyframes';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -23,6 +23,11 @@ out vec4 fragColor;
 #define DEG 0.01745329252
 
 uniform vec2  uRes;
+
+// TILED EXPORT. uRes is the FULL image; this is where the current tile starts within it. The
+// drawing buffer only ever has to be tile-sized, so a 16K still no longer needs a 16K WebGL
+// canvas — which browsers refuse well before that. Zero for an untiled render.
+uniform vec2  uTileOrigin;
 uniform float uTime;
 
 // camera
