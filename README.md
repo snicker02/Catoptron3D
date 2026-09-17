@@ -192,11 +192,21 @@ reports the FULL image and `uTileOrigin` says where the tile sits inside it. A 4
 **pixel-identical** to the single-pass render — zero differing pixels, which is the assertion worth
 having, since a half-pixel error per tile would show as seams.
 
-Two things that are easy to get wrong and are pinned by tests. GL counts rows from the BOTTOM and
-the 2D canvas from the top, so the tile origin is expressed in GL's frame — get it wrong and the
-strips arrive in the wrong order, which reads as corruption rather than as a flip. And the loop
-**yields between tiles**: a long synchronous loop would freeze the tab, which is precisely the bug
-that had just been removed from the program wait.
+Three things that are easy to get wrong and are pinned by tests.
+
+**Partial tiles.** The first version assumed the image divided evenly by the tile size. It almost
+never does: 2528x1422 at 1024 leaves a 480-wide column and a 398-tall row. The bottom row got a
+NEGATIVE origin, rendered a band from outside the frame, and pasted it over the picture. Each tile
+now renders only the part of itself inside the image, and the coverage is asserted to be exactly
+the image with nothing out of bounds. The divides-evenly case passed the whole time it was broken,
+which is why the tests now check sizes that do NOT divide.
+
+**Row order.** GL counts rows from the bottom and the 2D canvas from the top, so the origin is the
+bottom of the strip the tile actually covers. Get it wrong and the strips arrive out of order,
+which reads as corruption rather than as a flip.
+
+**Yielding.** The loop yields between tiles. A 135-tile synchronous loop would freeze the tab,
+which is precisely the bug that had just been removed from the program wait.
 
 Sizes past 2880 px only became possible with this, since the ceiling is now the 2D composite
 rather than WebGL:

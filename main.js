@@ -2852,26 +2852,33 @@ async function savePNG(){
 
   await withSamples(state.aaExport, async (n, ok) => {
     if(!ok) setStat('supersampled program would not build \u2014 rendering at 1\u00d71');
+    // PARTIAL TILES. The image almost never divides evenly by the tile size — 2528x1422 gives
+    // a 480-wide last column and a 398-tall last row — so each tile renders only the part of
+    // itself that is inside the image. Assuming whole tiles gave the bottom row a NEGATIVE
+    // origin, so it rendered a band from outside the frame and pasted it over the picture.
     const buf = new Uint8ClampedArray(tw * th * 4);
-    const flip = new Uint8ClampedArray(tw * th * 4);
     for(let ty = 0; ty < rows; ty++){
       for(let tx = 0; tx < cols; tx++){
         if(gl.isContextLost()){ failed = true; return; }
+        const twA = Math.min(tw, sw - tx * tw);        // this tile's real size
+        const thA = Math.min(th, sh - ty * th);
         tileFullW = sw; tileFullH = sh;
         tileOx = tx * tw;
-        // GL counts rows from the BOTTOM and the 2D canvas from the top, so the tile's origin
-        // has to be expressed in GL's frame or the strips come out in the wrong order.
-        tileOy = sh - (ty + 1) * th;
-        renderScene(tw, th);
-        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        for(let y = 0; y < th; y++){                 // flip rows into the 2D canvas' order
-          const src = (th - 1 - y) * tw * 4;
-          flip.set(buf.subarray(src, src + tw * 4), y * tw * 4);
+        // GL counts rows from the BOTTOM and the 2D canvas from the top. The origin is the
+        // bottom of the STRIP THIS TILE ACTUALLY COVERS, not of a full-height tile.
+        tileOy = sh - (ty * th + thA);
+        renderScene(twA, thA);                          // viewport is the real size, so no overrun
+        const view = buf.subarray(0, twA * thA * 4);
+        gl.readPixels(0, 0, twA, thA, gl.RGBA, gl.UNSIGNED_BYTE, view);
+        const flip = new Uint8ClampedArray(twA * thA * 4);
+        for(let y = 0; y < thA; y++){                   // flip rows into the 2D canvas' order
+          const src = (thA - 1 - y) * twA * 4;
+          flip.set(view.subarray(src, src + twA * 4), y * twA * 4);
         }
-        octx.putImageData(new ImageData(flip, tw, th), tx * tw, ty * th);
+        octx.putImageData(new ImageData(flip, twA, thA), tx * tw, ty * th);
         const done = ty * cols + tx + 1;
         setStat('rendering tile ' + done + ' of ' + total + ' \u00b7 ' + sw + '\u00d7' + sh);
-        await nextFrame();                            // yield, so the tab stays alive
+        await nextFrame();                              // yield, so the tab stays alive
       }
     }
   });

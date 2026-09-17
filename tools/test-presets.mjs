@@ -744,9 +744,13 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     // the canvas lock must be released on EVERY path, including one that never calls back
     // slice FORWARD from savePNG. quickRender is defined earlier in the file, so slicing to it
     // runs backwards and yields nothing — the same mistake that once corrupted the README.
+    // slice to the next TOP-LEVEL declaration, whatever kind it is. A fixed character budget was
+    // used here before and quietly stopped reaching the end of the function once the tile loop
+    // made savePNG longer — the assertions then passed on text they could no longer see.
     const spStart = js2.indexOf('async function savePNG(');
-    const spEnd = js2.indexOf('\nfunction ', spStart);
-    const sp = js2.slice(spStart, spEnd > spStart ? spEnd : spStart + 4000);
+    const after = js2.slice(spStart + 10);
+    const rel = after.search(/\n(?:async function|function|const|let) /);
+    const sp = js2.slice(spStart, rel >= 0 ? spStart + 10 + rel : js2.length);
     ok('the savePNG slice is non-empty', sp.length > 500, sp.length + ' chars');
     ok('the frame loop stands off during an export', /if\(exporting\)\{/.test(js2));
     ok('restore runs at most once', /if\(restored\) return;/.test(sp));
@@ -1016,14 +1020,46 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     // GL counts rows from the bottom, the 2D canvas from the top; get this wrong and the strips
     // come out in the wrong order, which looks like corruption rather than a flip
     ok('the tile origin is expressed in GL row order',
-       /tileOy = sh - \(ty \+ 1\) \* th/.test(js5));
-    ok('rows are flipped into canvas order', /const src = \(th - 1 - y\) \* tw \* 4/.test(js5));
+       /tileOy = sh - \(ty \* th \+ thA\)/.test(js5));
+    ok('rows are flipped into canvas order', /const src = \(thA - 1 - y\) \* twA \* 4/.test(js5));
     ok('the loop yields between tiles', /await nextFrame\(\)/.test(js5));
     ok('tile state is cleared after the export',
        /tileFullW = 0; tileFullH = 0; tileOx = 0; tileOy = 0;/.test(js5));
     ok('the composite canvas is size-checked before rendering',
        /out\.width !== sw \|\| out\.height !== sh/.test(js5));
     ok('encoding reads the composite, not the GL canvas', /out\.toBlob\(async blob/.test(js5));
+
+    // PARTIAL TILES. The first version assumed the image divided evenly by the tile size. It
+    // almost never does — 2528x1422 at 1024 leaves a 480-wide column and a 398-tall row — and the
+    // bottom row got a NEGATIVE origin, so it rendered a band from outside the frame and pasted
+    // it over the picture. The divides-evenly case passed the whole time.
+    const tileCover = (sw, sh, T) => {
+      let covered = 0, bad = 0;
+      const cols = Math.ceil(sw / T), rows = Math.ceil(sh / T);
+      for(let ty = 0; ty < rows; ty++) for(let tx = 0; tx < cols; tx++){
+        const twA = Math.min(T, sw - tx * T), thA = Math.min(T, sh - ty * T);
+        const oy = sh - (ty * T + thA);
+        if(oy < 0 || tx * T + twA > sw || ty * T + thA > sh || twA <= 0 || thA <= 0) bad++;
+        covered += twA * thA;
+      }
+      return { covered, bad, want: sw * sh };
+    };
+    for(const [sw, sh, T] of [[2528,1422,1024],[3840,2160,1024],[250,141,100],[1024,1024,1024],[1,1,1024]]){
+      const r2 = tileCover(sw, sh, T);
+      ok('tiles cover ' + sw + 'x' + sh + ' exactly, none out of bounds',
+         r2.bad === 0 && r2.covered === r2.want,
+         r2.bad + ' bad, ' + r2.covered + '/' + r2.want);
+    }
+    ok('the tile loop uses the tile\u2019s REAL size',
+       /const twA = Math\.min\(tw, sw - tx \* tw\)/.test(js5) &&
+       /const thA = Math\.min\(th, sh - ty \* th\)/.test(js5));
+    ok('the origin is the bottom of the strip actually covered',
+       /tileOy = sh - \(ty \* th \+ thA\)/.test(js5));
+    ok('the viewport matches the tile, so it cannot overrun',
+       /renderScene\(twA, thA\)/.test(js5));
+    ok('readback and paste use the real size',
+       /gl\.readPixels\(0, 0, twA, thA/.test(js5) &&
+       /new ImageData\(flip, twA, thA\), tx \* tw, ty \* th/.test(js5));
 
     // the larger sizes only make sense because of tiling
     const sizes = (js5.match(/const EXPORT_SIZES = \[([\s\S]*?)\];/) || [])[1] || '';
