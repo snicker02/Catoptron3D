@@ -1343,6 +1343,56 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        reach(stq.animLength, 0) + ' s');
   }
 
+  // CONTROL BINDINGS must survive a timeline sample. Every fold control closes over its slot —
+  // `v => { sl.p[pi] = v; }` — so assigning a fresh array to state.stack leaves them writing into
+  // objects that are no longer part of the state. The slider moves, the readout updates, nothing
+  // happens, and the panel looks dead. It took one scrub of the timeline to break.
+  {
+    const js9 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const blk = js9.slice(js9.indexOf('function adoptStack(next){'), js9.indexOf('function gotoTime(t){'));
+    const state9 = {
+      stack: [{ type: 8, p: [0.42], o: [0,0,0], r: [0,0,0] },
+              { type: 5, p: [1.0], o: [0,0,0], r: [0,0,0] }],
+      flame: { select: 2, maps: [{ vari: 0, M: [1,0,0,0,1,0,0,0,1], T: [0,0,0], rot: [0,0,0],
+                                   tr: [0,0,0], vp: [0.8, 2], scale: 1, vamt: 0.5, weight: 1 }] }
+    };
+    const { adoptStack, adoptFlame } =
+      (new Function('state', blk + '; return { adoptStack, adoptFlame };'))(state9);
+
+    const slot = state9.stack[0];
+    const slider = v => { slot.p[0] = v; };        // bound exactly as renderStack binds it
+    const rebuilt = adoptStack([{ type: 8, p: [0.9], o: [0,0,0], r: [0,0,0] },
+                                { type: 5, p: [2.0], o: [0,0,0], r: [0,0,0] }]);
+    ok('a same-shape sample needs no panel rebuild', rebuilt === false);
+    ok('and the sampled values are adopted', state9.stack[0].p[0] === 0.9);
+    slider(0.123);
+    ok('a control bound before the sample still writes to state',
+       state9.stack[0].p[0] === 0.123 && state9.stack[0] === slot);
+    ok('a different shape does ask for a rebuild',
+       adoptStack([{ type: 13, p: [2,2,2], o: [0,0,0], r: [0,0,0] }]) === true);
+
+    const xf = state9.flame.maps[0];
+    const xfSlider = v => { xf.vamt = v; };
+    const fr = adoptFlame({ select: 2, maps: [{ vari: 0, M: [1,0,0,0,1,0,0,0,1], T: [1,1,1],
+      rot: [0,0,0], tr: [0,0,0], vp: [0.9, 2], scale: 1, vamt: 0.7, weight: 1 }] });
+    ok('a same-shape flame needs no rebuild either', fr === false);
+    ok('and its values are adopted', state9.flame.maps[0].vamt === 0.7);
+    xfSlider(0.31);
+    ok('a transform control bound before the sample still writes',
+       state9.flame.maps[0].vamt === 0.31 && state9.flame.maps[0] === xf);
+    ok('a changed variation does ask for a rebuild',
+       adoptFlame({ select: 2, maps: [{ vari: 5, M: [1,0,0,0,1,0,0,0,1], T: [0,0,0], rot: [0,0,0],
+         tr: [0,0,0], vp: [], scale: 1, vamt: 1, weight: 1 }] }) === true);
+
+    ok('gotoTime rebuilds the panels when the shape changed',
+       /if\(rebuiltStack\) renderStack\(\);/.test(js9) &&
+       /if\(rebuiltFlame\)\{ renderXforms\(\)/.test(js9));
+    ok('editing a control interrupts playback',
+       /playback stopped/.test(js9) && /addEventListener\('pointerdown'/.test(js9));
+    ok('the key list is rebuilt only when the marked key changes',
+       /if\(now !== tlMarked\)\{ tlMarked = now; renderTimeline\(\); \}/.test(js9));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

@@ -859,6 +859,51 @@ function delKeyAt(t){
   renderTimeline();
 }
 
+// Adopt a sampled stack WITHOUT replacing the slot objects, whenever the shape allows.
+//
+// Every fold control closes over its slot: `v => { sl.p[pi] = v; }`. Assigning a fresh array to
+// state.stack leaves those controls writing into objects that are no longer part of the state, so
+// the slider moves, the readout updates, and nothing happens. It looks like the panel has died,
+// and it happened the moment the timeline was scrubbed or played even once.
+//
+// Mutating in place keeps every binding valid. Only a genuine change of SHAPE — a different
+// operator count or order — needs new objects, and that is the case where the panel has to be
+// rebuilt anyway.
+function adoptStack(next){
+  const cur = state.stack;
+  const same = Array.isArray(next) && Array.isArray(cur) && cur.length === next.length &&
+               cur.every((sl, i) => sl.type === next[i].type);
+  if(!same){ state.stack = next; return true; }
+  cur.forEach((sl, i) => {
+    const n = next[i];
+    for(let k = 0; k < sl.p.length; k++) if(n.p[k] !== undefined) sl.p[k] = n.p[k];
+    for(let k = 0; k < 3; k++){
+      if(n.o[k] !== undefined) sl.o[k] = n.o[k];
+      if(n.r[k] !== undefined) sl.r[k] = n.r[k];
+    }
+  });
+  return false;
+}
+
+// The flame panel binds to its transform objects in the same way, so it needs the same treatment.
+function adoptFlame(next){
+  const cur = state.flame;
+  if(!next){ if(cur){ state.flame = null; return true; } return false; }
+  const same = cur && cur.maps && next.maps && cur.maps.length === next.maps.length &&
+               (cur.select | 0) === (next.select | 0) &&
+               cur.maps.every((m, i) => (m.vari | 0) === (next.maps[i].vari | 0));
+  if(!same){ state.flame = next; return true; }
+  cur.maps.forEach((m, i) => {
+    const n = next.maps[i];
+    ['M', 'T', 'rot', 'tr', 'vp'].forEach(f => {
+      if(Array.isArray(m[f]) && Array.isArray(n[f]))
+        for(let k = 0; k < m[f].length; k++) if(n[f][k] !== undefined) m[f][k] = n[f][k];
+    });
+    ['scale', 'vamt', 'weight'].forEach(f => { if(n[f] !== undefined) m[f] = n[f]; });
+  });
+  return false;
+}
+
 function gotoTime(t){
   state.animTime = t;
   const st = sampleTimeline(timeline, t, applyPreset, DEFAULT_STATE, OPS,
@@ -870,8 +915,10 @@ function gotoTime(t){
     if(keepKeys.includes(k)) continue;
     if(typeof st[k] === 'number') state[k] = st[k];
   }
-  state.stack = st.stack;
-  state.flame = st.flame || null;
+  const rebuiltStack = adoptStack(st.stack);
+  const rebuiltFlame = adoptFlame(st.flame || null);
+  if(rebuiltStack) renderStack();
+  if(rebuiltFlame){ renderXforms(); renderXaos(); refreshFlameLabel(); }
   renderEpoch++;
 }
 
@@ -1612,6 +1659,7 @@ async function exportVideo(){
 }
 
 function renderTimeline(){
+  tlMarked = tlSorted().findIndex(k => Math.abs(k.t - state.animTime) < 1e-3);
   const host = $('tlKeys');
   if(!host) return;
   host.innerHTML = '';
@@ -1640,10 +1688,16 @@ function renderTimeline(){
   });
 }
 
+let tlMarked = -1;
+
 function syncTimelineUI(){
   const b = $('tlPlay');
   if(b) b.textContent = playing ? 'pause' : 'play';
-  renderTimeline();
+  // Only rebuild the key buttons when the highlighted one actually changes. This runs every
+  // frame during playback, and rebuilding that DOM sixty times a second makes the panel flicker
+  // and fights anything the pointer is doing in it.
+  const now = tlSorted().findIndex(k => Math.abs(k.t - state.animTime) < 1e-3);
+  if(now !== tlMarked){ tlMarked = now; renderTimeline(); }
   const o = $('tlOpts');
   if(o && o.dataset.t !== String(Math.round(state.animTime * 100))){
     o.dataset.t = String(Math.round(state.animTime * 100));
@@ -2558,6 +2612,20 @@ function buildPanel(){
   };
   $('tlFirst').onclick = () => { const k = tlSorted()[0]; if(k){ gotoTime(k.t); syncTimelineUI(); } };
   $('tlLast').onclick  = () => { const k = tlSorted().pop(); if(k){ gotoTime(k.t); syncTimelineUI(); } };
+  // Touching ANY control while the timeline is playing stops it. Playback assigns the whole
+  // state every frame, so an edit made during it is overwritten before the next repaint — the
+  // control looks broken when it is merely being outvoted.
+  ['panel', 'panelR'].forEach(id => {
+    const host = $(id);
+    if(!host) return;
+    host.addEventListener('pointerdown', () => {
+      if(!playing) return;
+      playing = false;
+      syncTimelineUI();
+      setStat('playback stopped \u2014 the timeline was overwriting your edits');
+    }, true);
+  });
+
   $('tlVideo').onclick = exportVideo;
   renderTimeline();
   buildTimelineOpts();

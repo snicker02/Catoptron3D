@@ -1332,6 +1332,26 @@ Treating the two alike would either churn programs or refuse to fade AO for no r
 Verified end to end: a 41-frame sample across a move that changes iterations, primitive and
 bounces uses **two programs**, one swap at the far key.
 
+### Sampling must not replace the objects the panel is bound to
+
+Every fold control closes over its slot — `v => { sl.p[pi] = v; }` — and every transform control
+over its map. Assigning a freshly sampled array to `state.stack` leaves those controls writing
+into objects that are no longer part of the state: the slider moves, the readout updates, nothing
+happens, and the panel looks dead. One scrub of the timeline was enough to do it.
+
+A sample is therefore adopted IN PLACE whenever the shape allows — same operator count, same
+types, same transform count and variations. Only a genuine change of shape gets new objects, and
+that is exactly the case where the panel has to be rebuilt anyway, which `gotoTime` then does.
+
+Two related things, since the symptom is the same "my controls stopped working":
+
+**Editing interrupts playback.** Playback assigns the whole state every frame, so an edit made
+during it is overwritten before the next repaint. Touching any control in the panels stops the
+timeline and says so, rather than leaving the control to be silently outvoted.
+
+**The key list is rebuilt only when the marked key changes**, not every frame. Rebuilding that DOM
+sixty times a second makes the panel flicker and fights whatever the pointer is doing in it.
+
 ### Angles take the short way
 
 Azimuth and yaw wrap. A move from +170 to -170 degrees is 20 degrees one way and 340 the other,
