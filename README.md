@@ -216,6 +216,23 @@ reaches both mvhd and mdhd, that stss is omitted when every frame is a keyframe 
 it is not, and that an empty sample list or a missing decoder description is refused rather than
 written as a broken file.
 
+### The lint that was missing
+
+Video export failed on the first run with "the provided double value is non-finite" from inside
+WebCodecs. The cause was three state keys that never existed: an insertion anchor had stopped
+matching, so `state.vidFps` was undefined, `Math.round(undefined)` was NaN, and the encoder was the
+thing that finally noticed.
+
+The same mistake had already happened once with the colour keys. Two lints were in place and both
+missed it — one checks that every key IN state has a control, the other that every key UPLOADED to
+the shader exists. Neither looks at a key that is read but was never added.
+
+There is now a lint for exactly that: **every `state.<key>` read anywhere in main.js must exist in
+state.** It catches both cases and anything of the shape.
+
+The encoder inputs are also coerced at the call site, with a finite check before configuring.
+WebCodecs should never be the thing that discovers a bad number.
+
 MP4 export needs WebCodecs, so Chrome or Edge. Elsewhere the button says so rather than producing
 something broken.
 

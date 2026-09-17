@@ -70,6 +70,7 @@ const state = {
   bestDepth: 0, scaleCap: 0,
   boxTrim: 1.0,
   animTime: 0, animEase: 1, animFlame: 0, animCamera: 1,  animLoop: 1,
+  vidFps: 30, vidSize: 1, vidQuality: 1,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
   // light
@@ -1518,9 +1519,17 @@ async function exportVideo(){
     setStat('this browser has no WebCodecs \u2014 MP4 export needs Chrome or Edge');
     return;
   }
-  const [, vw, vh] = VID_SIZES[state.vidSize] || VID_SIZES[1];
-  const fps = Math.max(1, Math.min(60, Math.round(state.vidFps)));
-  const bitrate = (VID_QUALITY[state.vidQuality] || VID_QUALITY[1])[1];
+  // Coerce everything the encoder is given. A missing state key made `fps` NaN once, and the
+  // failure surfaced as "the provided double value is non-finite" from deep inside WebCodecs —
+  // a long way from the cause. The encoder should never be the thing that discovers a bad number.
+  const num = (v, fallback) => (Number.isFinite(+v) ? +v : fallback);
+  const [, vw, vh] = VID_SIZES[num(state.vidSize, 1) | 0] || VID_SIZES[1];
+  const fps = Math.max(1, Math.min(60, Math.round(num(state.vidFps, 30))));
+  const bitrate = (VID_QUALITY[num(state.vidQuality, 1) | 0] || VID_QUALITY[1])[1];
+  if(!Number.isFinite(vw) || !Number.isFinite(vh) || !Number.isFinite(fps)){
+    setStat('video settings are not valid numbers');
+    return;
+  }
   const dur = tlDuration();
   if(dur <= 0){ setStat('the timeline has no length \u2014 add a key at a later time'); return; }
   const frames = Math.max(1, Math.round(dur * fps));

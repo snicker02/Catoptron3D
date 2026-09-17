@@ -1566,7 +1566,8 @@ console.log('preset format v' + PRESET_VERSION + '\n');
       // the timeline builds its own controls outside the group panels, and they are still
       // controls — a key reachable from a widget anywhere counts
       + js.slice(js.indexOf('function buildTimelineOpts()'), js.indexOf('function refreshPresetList()'))
-      + js.slice(js.indexOf('function addKey()'), js.indexOf('function renderTimeline()'));
+      + js.slice(js.indexOf('function addKey()'), js.indexOf('function renderTimeline()'))
+      + js.slice(js.indexOf('function buildVideoOpts()'), js.indexOf('function buildTimelineOpts()'));
     const missing = Object.keys(st).filter(k =>
       !NO_WIDGET.has(k) && !groups.includes("'" + k + "'") &&
       !builders.includes('state.' + k + ' ='));
@@ -1579,6 +1580,20 @@ console.log('preset format v' + PRESET_VERSION + '\n');
                             'Iterations', 'Primitive size'];
     const gone = FLAME_CONTROLS.filter(c => !js.includes("'" + c + "'"));
     ok('the flame tab still builds all of its controls', gone.length === 0, gone.join(', '));
+
+    // EVERY state.<key> read anywhere in main.js must exist in state. This is the general form of
+    // a mistake made twice: an insertion anchor that no longer matched, so the keys were never
+    // added, and `state.vidFps` came out undefined. Math.round(undefined) is NaN, which surfaced
+    // as "the provided double value is non-finite" from the video encoder — a long way from the
+    // cause. The two narrower lints below both missed it because they only inspect keys that are
+    // already present, or keys uploaded to the shader.
+    {
+      const read = [...new Set([...js.matchAll(/\bstate\.([A-Za-z_][A-Za-z0-9_]*)/g)]
+        .map(m => m[1]))];
+      const ghosts2 = read.filter(k => !(k in st));
+      ok('every state.<key> read in main.js exists in state',
+         ghosts2.length === 0, ghosts2.join(', '));
+    }
 
     // ...and the converse: every state.<key> the renderer UPLOADS must EXIST in state. A missing
     // one is uploaded as undefined, which silently becomes 0 or NaN in the shader. Two shipped
