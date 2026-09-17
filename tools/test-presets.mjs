@@ -1025,6 +1025,18 @@ console.log('preset format v' + PRESET_VERSION + '\n');
     ok('the loop yields between tiles', /await nextFrame\(\)/.test(js5));
     ok('tile state is cleared after the export',
        /tileFullW = 0; tileFullH = 0; tileOx = 0; tileOy = 0;/.test(js5));
+    // withSamples must AWAIT its draw callback. The tiled export yields between tiles, so an
+    // un-awaited callback lets withSamples resolve at the first await: the supersampled program
+    // and the sample count get restored while tiles are still rendering, and the caller carries
+    // on and encodes a half-drawn canvas. The export looked plausible and was simply wrong.
+    const ws2 = js5.slice(js5.indexOf('async function withSamples('),
+                          js5.indexOf('function renderScene('));
+    ok('withSamples awaits its draw callback', /try \{ await draw\(used, ok\); \}/.test(ws2));
+    ok('and restores only afterwards',
+       ws2.indexOf('await draw(used, ok)') < ws2.indexOf('finally { renderAA = prevAA'));
+    ok('the tiled export passes an async callback',
+       /await withSamples\(state\.aaExport, async \(n, ok\) =>/.test(js5));
+
     ok('the composite canvas is size-checked before rendering',
        /out\.width !== sw \|\| out\.height !== sh/.test(js5));
     ok('encoding reads the composite, not the GL canvas', /out\.toBlob\(async blob/.test(js5));

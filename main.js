@@ -356,7 +356,12 @@ async function withSamples(n, draw){
     else ok = false;
   }
   renderAA = used; cur = entry;
-  try { draw(used, ok); }
+  // AWAIT the draw. It is allowed to be async — the tiled export yields between tiles — and
+  // without this the finally below runs the moment the callback hits its first await: the
+  // supersampled program and the sample count are restored while the tiles are still rendering,
+  // and the caller carries on and encodes a half-drawn canvas. That is not a subtle degradation,
+  // it is the wrong image.
+  try { await draw(used, ok); }
   finally { renderAA = prevAA; cur = prevCur; curSig = prevSig; }
 }
 

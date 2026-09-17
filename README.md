@@ -205,6 +205,12 @@ which is why the tests now check sizes that do NOT divide.
 bottom of the strip the tile actually covers. Get it wrong and the strips arrive out of order,
 which reads as corruption rather than as a flip.
 
+**Awaiting the draw.** `withSamples` has to AWAIT its callback. The tile loop yields, so an
+un-awaited callback let `withSamples` resolve at the first `await`: the supersampled program and
+the sample count were restored while tiles were still rendering, and the caller went on to encode
+a half-drawn canvas. The export came out looking plausible and was simply the wrong picture. This
+is the same class as the busy-wait below — async work that the surrounding code does not wait for.
+
 **Yielding.** The loop yields between tiles. A 135-tile synchronous loop would freeze the tab,
 which is precisely the bug that had just been removed from the program wait.
 
