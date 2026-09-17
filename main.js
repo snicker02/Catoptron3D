@@ -15,6 +15,7 @@ import { capture, apply as applyPreset, encode, decode, parseAny,
 import { FACTORY } from './engine/factory.js';
 import { buildField } from './engine/voxel.js';
 import { sampleTimeline, EASINGS, STEP_KEYS } from './engine/anim.js';
+import { muxMP4 } from './engine/mp4.js';
 import { inverseFloor, projectedScale } from './engine/flame.js';
 import { renderMarkdown } from './engine/markdown.js';
 import { parseFlame, resolveFlame, resolveXform, identityXform, MAX_XFORMS,
@@ -37,7 +38,19 @@ const PALETTES = [
   { name: 'Bone',             a: [.62, .60, .56], b: [.32, .32, .30], c: [1, 1, 1],    d: [.30, .32, .35], bg: DARK },
   { name: 'Clay white',       a: [.84, .84, .85], b: [.11, .11, .12], c: [1, 1, 1],    d: [.20, .24, .28], bg: CLAY },
   { name: 'Daylight city',    a: [.58, .59, .61], b: [.26, .25, .24], c: [1, 1, 1],    d: [.45, .48, .54], bg: DAY },
-  { name: 'Glacier glass',    a: [.40, .50, .60], b: [.30, .34, .38], c: [1, 1, 1],    d: [.55, .60, .68], bg: LIT }
+  { name: 'Glacier glass',    a: [.40, .50, .60], b: [.30, .34, .38], c: [1, 1, 1],    d: [.55, .60, .68], bg: LIT },
+  // A second bank, weighted toward gradients that survive REPEATS: their ends are close in value
+  // and hue, so a mirrored or repeated walk meets itself without an obvious seam.
+  { name: 'Verdigris',        a: [.34, .46, .44], b: [.30, .34, .28], c: [1, 1, 1],    d: [.35, .52, .62], bg: DARK },
+  { name: 'Oxide',            a: [.44, .28, .22], b: [.36, .22, .16], c: [1, .95, .9], d: [.00, .10, .20], bg: DARK },
+  { name: 'Ink and salt',     a: [.50, .52, .58], b: [.48, .48, .52], c: [1, 1, 1],    d: [.00, .10, .20], bg: DARK },
+  { name: 'Sodium',           a: [.56, .42, .18], b: [.42, .32, .12], c: [1, 1, .85],  d: [.18, .12, .05], bg: DARK },
+  { name: 'Cyanotype',        a: [.24, .34, .50], b: [.24, .32, .44], c: [1, 1, 1],    d: [.55, .62, .72], bg: DARK },
+  { name: 'Tarnish',          a: [.46, .44, .38], b: [.26, .28, .24], c: [1, 1.2, .9], d: [.10, .20, .35], bg: DARK },
+  { name: 'Aubergine',        a: [.38, .28, .44], b: [.34, .24, .38], c: [1, 1, 1],    d: [.20, .05, .35], bg: DARK },
+  { name: 'Sea ice',          a: [.52, .60, .62], b: [.30, .34, .34], c: [1, 1, 1],    d: [.45, .55, .60], bg: LIT },
+  { name: 'Foundry',          a: [.42, .32, .28], b: [.40, .28, .20], c: [1, .85, .6], d: [.05, .25, .45], bg: DARK },
+  { name: 'Chalk and slate',  a: [.62, .63, .64], b: [.28, .29, .31], c: [1, 1, 1],    d: [.55, .58, .62], bg: CLAY }
 ];
 
 /* ── state — flat and serialisable ─────────────────────────────────────────────────────── */
@@ -71,6 +84,7 @@ const state = {
   cityStreet: 0.28, cityHeight: 0.9, cityVar: 0.7, cityDetail: 0.0,
   sun: 0.0, haze: 0.0,
   palette: 0, trapScale: 0.55, trapShift: 0.12, trapChan: 0, selBlend: 0.35,
+  colSrc: 0, colRepeat: 1, colMirror: 0, colRev: 0, colGamma: 1,
   glow: 0.0, exposure: 1.25, sat: 1.0,
   // user image
   envAmt: 0.0, envGain: 1.0, envRot: 0.0, texAmt: 0.0, texScale: 0.35,
@@ -494,6 +508,11 @@ function renderScene(w, h){
   u1(L, 'uHaze', state.haze);
   u1(L, 'uTrapScale', state.trapScale);
   u1(L, 'uTrapChan', state.trapChan);
+  u1(L, 'uColSrc', state.colSrc);
+  u1(L, 'uColRepeat', state.colRepeat);
+  u1(L, 'uColMirror', state.colMirror);
+  u1(L, 'uColRev', state.colRev);
+  u1(L, 'uColGamma', state.colGamma);
   u1(L, 'uSelBlend', state.selBlend);
   u1(L, 'uBoxTrim', state.boxTrim);
   u3(L, 'uCropLo', state.cropCx - state.cropSx * 0.5,
@@ -1476,6 +1495,111 @@ function loadPreset(p, keepCamera){
   }
 }
 
+/* ── video export ──────────────────────────────────────────────────────────────────────────
+   WebCodecs encodes the frames; the container is written by engine/mp4.js, because the browser
+   has no MP4 writer and a muxer library would be a dependency this project does not take.
+
+   Frames are rendered one at a time off the timeline and handed straight to the encoder. It is
+   deliberately NOT real-time capture: MediaRecorder would record whatever the page managed to
+   draw, so a frame that took 400 ms would either stutter or be dropped. Rendering frame by frame
+   means a heavy scene simply takes longer to export and the result is still exactly right.      */
+const VID_SIZES = [['720p', 1280, 720], ['1080p', 1920, 1080], ['1440p', 2560, 1440],
+                   ['2160p', 3840, 2160]];
+const VID_QUALITY = [['draft', 4e6], ['good', 12e6], ['high', 32e6], ['very high', 80e6]];
+
+function videoSupported(){
+  return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined';
+}
+
+async function exportVideo(){
+  if(!timeline.length){ setStat('no keys to export'); return; }
+  if(exporting){ setStat('already exporting\u2026'); return; }
+  if(!videoSupported()){
+    setStat('this browser has no WebCodecs \u2014 MP4 export needs Chrome or Edge');
+    return;
+  }
+  const [, vw, vh] = VID_SIZES[state.vidSize] || VID_SIZES[1];
+  const fps = Math.max(1, Math.min(60, Math.round(state.vidFps)));
+  const bitrate = (VID_QUALITY[state.vidQuality] || VID_QUALITY[1])[1];
+  const dur = tlDuration();
+  if(dur <= 0){ setStat('the timeline has no length \u2014 add a key at a later time'); return; }
+  const frames = Math.max(1, Math.round(dur * fps));
+
+  // 90k is the conventional video timescale and divides evenly for common rates
+  const TIMESCALE = 90000;
+  const perFrame = Math.round(TIMESCALE / fps);
+
+  let enc = null, desc = null;
+  const chunks = [];
+  try {
+    const cfg = { codec: 'avc1.640028', width: vw, height: vh, bitrate,
+                  framerate: fps, avc: { format: 'avc' } };
+    const sup = await VideoEncoder.isConfigSupported(cfg);
+    if(!sup || !sup.supported) throw new Error('H.264 not supported at that size');
+    enc = new VideoEncoder({
+      output: (chunk, meta) => {
+        if(meta && meta.decoderConfig && meta.decoderConfig.description)
+          desc = new Uint8Array(meta.decoderConfig.description);
+        const buf = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(buf);
+        chunks.push({ data: buf, duration: perFrame, key: chunk.type === 'key' });
+      },
+      error: e => { console.error('[catoptron3d] encoder', e); setStat('encoder error \u2014 see console'); }
+    });
+    enc.configure(cfg);
+  } catch(e){
+    setStat('could not start the encoder: ' + (e && e.message ? e.message : e));
+    return;
+  }
+
+  const wasPlaying = playing, wasTime = state.animTime;
+  playing = false;
+  exporting = true;
+  const pw = cv.width, ph = cv.height;
+  cv.width = vw; cv.height = vh;
+  let okSize = (cv.width === vw && cv.height === vh);
+
+  if(okSize){
+    for(let i = 0; i < frames; i++){
+      if(gl.isContextLost()){ okSize = false; break; }
+      gotoTime(dur * (i / Math.max(frames - 1, 1)));
+      syncProgram(performance.now());
+      renderScene(vw, vh);
+      const frame = new VideoFrame(cv, { timestamp: Math.round(i * 1e6 / fps),
+                                         duration: Math.round(1e6 / fps) });
+      // a keyframe every second keeps the file seekable in an editor
+      enc.encode(frame, { keyFrame: i % fps === 0 });
+      frame.close();
+      if((i & 3) === 0 || i === frames - 1)
+        setStat('encoding frame ' + (i + 1) + ' of ' + frames + ' \u00b7 ' + vw + '\u00d7' + vh);
+      await nextFrame();
+    }
+  }
+
+  try { await enc.flush(); } catch(e){ /* reported by the error callback */ }
+  try { enc.close(); } catch(e){}
+
+  cv.width = pw; cv.height = ph; W = 0; H = 0;
+  exporting = false;
+  state.animTime = wasTime; playing = wasPlaying;
+  gotoTime(wasTime);
+
+  if(!okSize){ setStat('that video size was refused \u2014 try smaller'); return; }
+  if(!chunks.length || !desc){ setStat('the encoder produced nothing'); return; }
+
+  let bytes;
+  try {
+    bytes = muxMP4({ width: vw, height: vh, timescale: TIMESCALE, samples: chunks, description: desc });
+  } catch(e){
+    setStat('could not write the MP4: ' + (e && e.message ? e.message : e));
+    return;
+  }
+  const blob = new Blob([bytes], { type: 'video/mp4' });
+  const url = URL.createObjectURL(blob);
+  offerSaveLink(url, 'catoptron3d_' + vw + 'x' + vh + '_' + Date.now() + '.mp4');
+  setStat('wrote ' + frames + ' frames \u00b7 ' + (bytes.length / 1048576).toFixed(1) + ' MB');
+}
+
 function renderTimeline(){
   const host = $('tlKeys');
   if(!host) return;
@@ -1513,6 +1637,33 @@ function syncTimelineUI(){
   if(o && o.dataset.t !== String(Math.round(state.animTime * 100))){
     o.dataset.t = String(Math.round(state.animTime * 100));
   }
+}
+
+function buildVideoOpts(){
+  const o = $('tlVidOpts');
+  if(!o) return;
+  o.innerHTML = '';
+  o.append(mkSelect('Video size', VID_SIZES.map(v => v[0]), state.vidSize,
+                    v => { state.vidSize = v; }, false));
+  o.append(mkSelect('Frame rate', ['24', '25', '30', '48', '60'],
+                    ['24','25','30','48','60'].indexOf(String(state.vidFps)) < 0 ? 2
+                      : ['24','25','30','48','60'].indexOf(String(state.vidFps)),
+                    v => { state.vidFps = +['24','25','30','48','60'][v]; }, false));
+  o.append(mkSelect('Quality', VID_QUALITY.map(q => q[0]), state.vidQuality,
+                    v => { state.vidQuality = v; }, false));
+  const n = document.createElement('p');
+  n.className = 'note';
+  n.textContent = videoSupported()
+    ? 'H.264 in MP4, encoded by WebCodecs and written into the container by hand \u2014 the '
+      + 'browser has no MP4 writer and a muxer library would be a dependency. Frames are '
+      + 'rendered ONE AT A TIME and handed to the encoder, not captured in real time: recording '
+      + 'the canvas live would drop or stutter any frame that took longer than its slot, whereas '
+      + 'this just takes as long as it takes and comes out exactly right. A keyframe every second '
+      + 'keeps it seekable in an editor.'
+    : 'MP4 export needs WebCodecs, which this browser does not have \u2014 Chrome or Edge. The '
+      + 'button will say so rather than produce a broken file.';
+  o.append(n);
+  collapseNotes(o);
 }
 
 function buildTimelineOpts(){
@@ -2157,6 +2308,34 @@ function buildGlobals(){
     if(title === 'Colour'){
       g.append(mkSelect('Palette', PALETTES.map(p => p.name), state.palette,
                         v => { state.palette = v; }, false));
+      g.append(mkSelect('Colour source',
+                        ['orbit trap', 'depth', 'facing', 'height', 'occlusion', 'slope'],
+                        state.colSrc, v => { state.colSrc = v; rebuildGlobals(); }, false));
+      const cs = document.createElement('p');
+      cs.className = 'note';
+      cs.textContent = 'What drives the palette. The ORBIT TRAP is a property of the fold, which '
+        + 'is why it bands along the structure \u2014 but on a shape whose interest is its '
+        + 'silhouette or its depth it is the least informative choice available. DEPTH separates '
+        + 'near from far, FACING lights the rim against the front, HEIGHT cuts horizontal bands, '
+        + 'OCCLUSION darkens what is enclosed and reads like dirt in the crevices, SLOPE splits '
+        + 'floors from walls. Trap channel below only applies to the orbit trap.';
+      g.append(cs);
+      g.append(mkSlider('Gradient repeat', 0.1, 12, 0.05, state.colRepeat,
+                        v => { state.colRepeat = v; }, 2));
+      g.append(mkSelect('Repeat style', ['wrap', 'mirror'], state.colMirror ? 1 : 0,
+                        v => { state.colMirror = v; }, false));
+      g.append(mkSlider('Gradient gamma', 0.15, 6, 0.01, state.colGamma,
+                        v => { state.colGamma = v; }, 2));
+      g.append(mkSelect('Gradient direction', ['forward', 'reversed'], state.colRev ? 1 : 0,
+                        v => { state.colRev = v; }, false));
+      const gs = document.createElement('p');
+      gs.className = 'note';
+      gs.textContent = 'REPEAT walks the palette more than once across the range. On WRAP each '
+        + 'repeat snaps back at the seam, which is the hard banding that reads as a fault; on '
+        + 'MIRROR the repeats meet themselves and the bands look deliberate. GAMMA decides where '
+        + 'the gradient spends its range \u2014 below 1 pushes detail into the dark end, above 1 '
+        + 'into the light.';
+      g.append(gs);
       g.append(mkSelect('Trap channel',
                         ['radius \u2014 concentric rings', 'X axis', 'Y axis', 'Z axis',
                          'min of X,Y,Z \u2014 cell edges'],
@@ -2356,8 +2535,10 @@ function buildPanel(){
   };
   $('tlFirst').onclick = () => { const k = tlSorted()[0]; if(k){ gotoTime(k.t); syncTimelineUI(); } };
   $('tlLast').onclick  = () => { const k = tlSorted().pop(); if(k){ gotoTime(k.t); syncTimelineUI(); } };
+  $('tlVideo').onclick = exportVideo;
   renderTimeline();
   buildTimelineOpts();
+  buildVideoOpts();
 
   $('presetSave').onclick   = savePreset;
   $('presetLoad').onclick   = () => {

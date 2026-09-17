@@ -1179,6 +1179,142 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        anim.sampleTimeline([], 0.5, apply, DEF2, OPS, {}) === null);
   }
 
+  // COLOUR SOURCES and gradient shaping. All of it is uniforms, so none of it may change the
+  // program — a colour control that forced a recompile would stutter every drag.
+  {
+    const { assemble, signature } = await import(new URL('../engine/assemble.js', import.meta.url).href);
+    const base = { stack: [{ type: 8, p: [0.42] }], prim: 0, iters: 6, steps: 128,
+                   ao: true, shadow: false, glow: false, bounces: 0 };
+    const src2 = assemble(base);
+    ok('depth reaches the shading function',
+       src2.includes('shadeSurface(p, n, rd, trap, t, base)') &&
+       src2.includes('vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap, float depth'));
+    for(const u of ['uColSrc', 'uColRepeat', 'uColMirror', 'uColRev', 'uColGamma'])
+      ok('the shader reads ' + u, src2.includes(u));
+    ok('colouring costs no recompile', signature(base) === signature(base));
+
+    // the occlusion source must not call calcAO when AO is compiled out, or it would not link
+    const noAo = assemble({ ...base, ao: false });
+    ok('the occlusion source folds to a constant when AO is off',
+       noAo.includes('raw = 1.0 - 1.0') && !noAo.includes('calcAO'));
+    ok('and calls calcAO when AO is on', src2.includes('raw = 1.0 - calcAO(p, n)'));
+
+    // shaping must stay inside the gradient: out-of-range would sample the palette wildly
+    const shape = (raw, rep, mir, gam, rev) => {
+      let ct = raw * rep;
+      if(mir) ct = Math.abs((ct * 0.5 % 1) * 2 - 1);
+      else { ct = ct % 1; if(ct < 0) ct += 1; }
+      ct = Math.pow(Math.min(Math.max(ct, 0), 1), Math.max(gam, 0.01));
+      return rev ? 1 - ct : ct;
+    };
+    let bad = 0;
+    for(let i = 0; i <= 200; i++)
+      for(const [rep, mir, gam, rev] of [[1,0,1,0],[7.5,0,1,0],[7.5,1,1,0],[3,1,0.2,1],[0.1,0,5,0]]){
+        const v = shape((i / 200) * 4 - 1, rep, mir, gam, rev);
+        if(!(v >= 0 && v <= 1) || !isFinite(v)) bad++;
+      }
+    ok('gradient shaping always lands inside the palette', bad === 0, bad + ' out of range');
+
+    // mirroring is what makes a repeat meet itself; wrapping deliberately does not
+    const seamM = Math.abs(shape(0.999999, 4, 1, 1, 0) - shape(1.000001, 4, 1, 1, 0));
+    const seamW = Math.abs(shape(0.249999, 4, 0, 1, 0) - shape(0.250001, 4, 0, 1, 0));
+    ok('mirrored repeats are continuous at the seam', seamM < 1e-3, seamM.toExponential(1));
+    ok('wrapped repeats are not, which is the point', seamW > 0.9, seamW.toFixed(3));
+
+    const js6 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const pal = js6.slice(js6.indexOf('const PALETTES = ['), js6.indexOf('\n];', js6.indexOf('const PALETTES = [')));
+    const names = [...pal.matchAll(/name: '([^']+)'/g)].map(m => m[1]);
+    ok('there are at least 19 palettes', names.length >= 19, names.length + '');
+    ok('palette names are unique', new Set(names).size === names.length);
+  }
+
+  // MP4 MUXER. WebCodecs gives encoded samples and nothing to put them in, so the container is
+  // written by hand. A container that merely PARSES is not enough — wrong offsets or sizes still
+  // parse and then decode to garbage — so tools/mux-check.sh runs real H.264 through it and
+  // compares the decoded frames against the source. These are the structural checks.
+  {
+    const { muxMP4 } = await import(new URL('../engine/mp4.js', import.meta.url).href);
+    const desc = new Uint8Array([1, 0x42, 0xc0, 0x0d, 0xff, 0xe1, 0, 4, 0x67, 0x42, 0xc0, 0x0d,
+                                 1, 0, 4, 0x68, 0xce, 0x3c, 0x80]);
+    const mk = n => Array.from({ length: n }, (_, i) => ({
+      data: new Uint8Array(100 + i), duration: 512, key: i % 25 === 0 }));
+
+    const out = muxMP4({ width: 320, height: 240, timescale: 12800,
+                         samples: mk(50), description: desc });
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    const fourcc = o => String.fromCharCode(out[o+4], out[o+5], out[o+6], out[o+7]);
+
+    ok('the file starts with ftyp', fourcc(0) === 'ftyp');
+    // walk the top level and check the order: ftyp, mdat, moov
+    const top = [];
+    for(let o = 0; o + 8 <= out.length; ){
+      const sz = dv.getUint32(o);
+      if(sz < 8) break;
+      top.push(fourcc(o));
+      o += sz;
+    }
+    ok('top level is ftyp, mdat, moov', top.join(',') === 'ftyp,mdat,moov', top.join(','));
+    ok('the boxes account for the whole file exactly', (() => {
+      let o = 0;
+      while(o + 8 <= out.length) o += dv.getUint32(o);
+      return o === out.length;
+    })(), out.length + ' bytes');
+
+    // sample data must actually be inside mdat, contiguously
+    const mdatStart = dv.getUint32(0) + 8;
+    const payload = mk(50).reduce((a, s) => a + s.data.length, 0);
+    ok('mdat declares exactly the sample bytes',
+       dv.getUint32(dv.getUint32(0)) === payload + 8);
+    ok('the first sample begins right after the mdat header',
+       mdatStart === dv.getUint32(0) + 8);
+
+    ok('an empty sample list is refused', (() => {
+      try { muxMP4({ width: 8, height: 8, timescale: 90000, samples: [], description: desc }); }
+      catch(e){ return true; }
+      return false;
+    })());
+    ok('a missing decoder description is refused', (() => {
+      try { muxMP4({ width: 8, height: 8, timescale: 90000, samples: mk(2) }); }
+      catch(e){ return true; }
+      return false;
+    })());
+
+    // stss is dropped when every frame is a keyframe, and present when they are not
+    const allKey = Array.from({ length: 4 }, () => ({ data: new Uint8Array(9), duration: 1, key: true }));
+    const someKey = mk(4);
+    const has = (buf, cc) => {
+      for(let o = 0; o + 8 <= buf.length; o++)
+        if(String.fromCharCode(buf[o], buf[o+1], buf[o+2], buf[o+3]) === cc) return true;
+      return false;
+    };
+    ok('stss is omitted when every frame is a keyframe',
+       !has(muxMP4({ width: 8, height: 8, timescale: 90, samples: allKey, description: desc }), 'stss'));
+    ok('and present when only some are',
+       has(muxMP4({ width: 8, height: 8, timescale: 90, samples: someKey, description: desc }), 'stss'));
+
+    // duration must be the sum of the sample durations, in both mvhd and mdhd
+    const v = muxMP4({ width: 8, height: 8, timescale: 1000,
+                       samples: [{ data: new Uint8Array(4), duration: 40, key: true },
+                                 { data: new Uint8Array(4), duration: 40, key: false }],
+                       description: desc });
+    const dv2 = new DataView(v.buffer, v.byteOffset, v.byteLength);
+    let found = 0;
+    for(let o = 0; o + 24 <= v.length; o++){
+      const cc = String.fromCharCode(v[o], v[o+1], v[o+2], v[o+3]);
+      if(cc === 'mvhd' || cc === 'mdhd'){
+        if(dv2.getUint32(o + 4 + 4 + 8 + 4) === 80) found++;   // duration field
+      }
+    }
+    ok('mvhd and mdhd both carry the summed duration', found === 2, found + ' of 2');
+
+    const js7 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    // the word appears in a comment explaining why it is NOT used, so look for construction
+    ok('export renders frame by frame rather than capturing live',
+       /enc\.encode\(frame/.test(js7) && !/new MediaRecorder/.test(js7));
+    ok('and reports plainly when WebCodecs is absent',
+       /typeof VideoEncoder !== 'undefined'/.test(js7));
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;

@@ -178,6 +178,47 @@ document traces back to that.
 Giving the flame its own program would not change it. The problem is mathematical, not
 architectural.
 
+## Video export
+
+**export MP4** in the Timeline panel. H.264 in MP4, at 720p to 2160p, 24 to 60 fps.
+
+WebCodecs does the encoding. It does not do the container — the browser has no MP4 writer — and
+every other project reaches for a muxer library at this point, which is a dependency this one does
+not take. So `engine/mp4.js` writes the container by hand: ftyp, mdat, then moov with the full
+sample index (stts, stss, stsc, stsz, stco and an avc1/avcC sample description).
+
+Progressive rather than fragmented. Fragmented is easier to write streaming, but progressive is
+what every player and every editor opens without argument, and the render finishes before muxing
+begins so there is nothing to gain from streaming.
+
+### Frame by frame, not screen capture
+
+The frames are rendered ONE AT A TIME off the timeline and handed straight to the encoder. The
+obvious alternative — `MediaRecorder` on a canvas stream — records whatever the page manages to
+draw in real time, so on a scene where a frame takes 400 ms it either stutters or drops frames.
+Rendering frame by frame means a heavy scene simply takes longer to export and the result is still
+exactly right. It also means MP4 rather than WebM, which is what MediaRecorder would have given.
+
+A keyframe every second keeps the file seekable in an editor.
+
+### How the muxer is verified
+
+A container that merely PARSES is not enough. Wrong offsets or sizes still parse — ffprobe will
+report the codec, the size and the frame count quite happily — and then decode to garbage.
+
+`tools/mux-check.sh` takes genuine H.264 out of a reference file, muxes it with our writer,
+decodes both, and compares the frames. **50 frames, worst channel difference 0.** ffprobe also
+reads back the same codec, dimensions, frame rate and duration as the source.
+
+The suite adds the structural checks that do not need ffmpeg: box order, that the boxes account
+for the whole file exactly, that mdat declares exactly the sample bytes, that the summed duration
+reaches both mvhd and mdhd, that stss is omitted when every frame is a keyframe and present when
+it is not, and that an empty sample list or a missing decoder description is refused rather than
+written as a broken file.
+
+MP4 export needs WebCodecs, so Chrome or Edge. Elsewhere the button says so rather than producing
+something broken.
+
 ### Tiled export
 
 The export used to resize the WebGL canvas to the full image and draw once. That caps the result

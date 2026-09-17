@@ -742,7 +742,7 @@ vec3 aerial(vec3 col, vec3 rd, float t){
   return mix(col, h * (1.0 + uHaze * 0.4), f);
 }
 
-vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap, out vec3 albedo){
+vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap, float depth, out vec3 albedo){
   // WHICH trap component drives colour is a choice, and it decides the SHAPE of the banding.
   //
   // trap.w is the squared orbit radius — a radial quantity — so on a flat panel its level sets
@@ -756,7 +756,34 @@ vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, vec4 trap, out vec3 albedo){
   else if(uTrapChan < 2.5) tw = trap.y;
   else if(uTrapChan < 3.5) tw = trap.z;
   else                     tw = min(trap.x, min(trap.y, trap.z));
-  float ct = clamp(tw * uTrapScale + uTrapShift, 0.0, 1.0);
+  float raw = tw;
+
+  // COLOUR SOURCE. The orbit trap is a property of the FOLD, which is why it bands along the
+  // structure — but it is not the only thing worth colouring by, and on a shape whose interest is
+  // its silhouette or its depth it is the least informative choice available.
+  if(uColSrc > 0.5){
+    if(uColSrc < 1.5)      raw = depth * 0.25;                      // distance from the camera
+    else if(uColSrc < 2.5) raw = 1.0 - clamp(dot(n, -rd), 0.0, 1.0); // facing: rim versus front
+    else if(uColSrc < 3.5) raw = p.y * 0.5 + 0.5;                   // world height
+    else if(uColSrc < 4.5) raw = 1.0 - ${cfg.ao ? 'calcAO(p, n)' : '1.0'};  // how enclosed it is
+    else                   raw = 1.0 - abs(n.y);                    // slope: floors versus walls
+  }
+
+  float ct = raw * uTrapScale + uTrapShift;
+
+  // GRADIENT SHAPING. Repeat walks the palette more than once across the range; mirroring makes
+  // those repeats meet seamlessly instead of snapping back at every wrap, which is the difference
+  // between banding that looks deliberate and banding that looks like a fault. Gamma decides
+  // where the gradient spends its range, reverse flips it.
+  ct *= max(uColRepeat, 0.001);
+  if(uColMirror > 0.5){
+    ct = abs(fract(ct * 0.5) * 2.0 - 1.0);
+  } else {
+    ct = fract(ct);
+    if(ct < 0.0) ct += 1.0;
+  }
+  ct = pow(clamp(ct, 0.0, 1.0), max(uColGamma, 0.01));
+  if(uColRev > 0.5) ct = 1.0 - ct;
   vec3 base = palette(ct);
 ${cfg.tex ? `
   // Triplanar projection — no UVs exist on an implicit surface, so the photo is blended from
@@ -806,7 +833,7 @@ vec3 tracePath(vec3 ro, vec3 rd, float ior, out float glowTot){
     mapT(p, trap, safeIgn);
 
     vec3 base;
-    vec3 c = shadeSurface(p, n, rd, trap, base);
+    vec3 c = shadeSurface(p, n, rd, trap, t, base);
     c = aerial(c, rd, t);
 ${cfg.transp ? `
     // Beer-Lambert: light that crossed the medium is absorbed in proportion to path length,

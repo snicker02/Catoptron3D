@@ -8,7 +8,7 @@
 //   operator norm of its Jacobian at p. The estimator finishes with prim(p) / s.
 //   Under-report s and the ray punches through surfaces. Over-report and you only lose speed.
 
-export const BUILD = '0.55.2-await-tiles';
+export const BUILD = '0.57.0-mp4-export';
 
 export const VS = `#version 300 es
 in vec2 aPos;
@@ -137,7 +137,14 @@ uniform float uCityVar;
 uniform float uCityDetail;
 uniform float uTrapScale;
 uniform float uSelBlend;    // 0 = image box, 1 = nearest image; the blend selection rule
-uniform float uTrapChan;    // which orbit-trap component drives colour
+uniform float uTrapChan;
+
+// COLOUR SOURCE and gradient shaping. What drives the palette, and how the palette is walked.
+uniform float uColSrc;      // 0 trap, 1 depth, 2 facing, 3 height, 4 occlusion, 5 slope
+uniform float uColRepeat;   // how many times the gradient runs across the range
+uniform float uColMirror;   // 1 = ping-pong instead of wrapping, so repeats meet seamlessly
+uniform float uColRev;      // 1 = walk the gradient backwards
+uniform float uColGamma;    // bends where the gradient spends its range    // which orbit-trap component drives colour
 uniform float uTrapShift;
 uniform float uGlow;
 uniform float uExposure;
