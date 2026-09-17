@@ -70,6 +70,7 @@ const state = {
   bestDepth: 0, scaleCap: 0,
   boxTrim: 1.0,
   animTime: 0, animEase: 1, animFlame: 0, animCamera: 1,  animLoop: 1,
+  animLength: 10,
   vidFps: 30, vidSize: 1, vidQuality: 1,
   crop: 0, cropCx: 0, cropCy: 0, cropCz: 0, cropSx: 2, cropSy: 2, cropSz: 2, normEps: 1.0,
   steps: 128, stepScale: 0.85, maxDist: 40, eps: 0.0009,
@@ -848,6 +849,7 @@ function addKey(){
   const at = timeline.findIndex(k => Math.abs(k.t - t) < 1e-4);
   if(at >= 0) timeline[at] = { t, preset };            // replace, so re-keying a time works
   else timeline.push({ t, preset });
+  if(t > state.animLength) state.animLength = Math.ceil(t);
   renderTimeline();
   setStat((at >= 0 ? 'replaced' : 'added') + ' key at ' + t.toFixed(2) + ' s');
 }
@@ -1679,7 +1681,16 @@ function buildTimelineOpts(){
   const o = $('tlOpts');
   if(!o) return;
   o.innerHTML = '';
-  o.append(mkSlider('Time', 0, Math.max(tlDuration(), 1), 0.01, state.animTime,
+  // TIMELINE LENGTH sets how far the Time slider reaches, and it has to be its own control.
+  // The slider used to span the timeline's own duration, which is zero until a key exists — so
+  // it clamped to one second and there was no way to scrub far enough to place a later key.
+  // The length could never grow past the keys, and the keys could never be placed past the
+  // length.
+  o.append(mkSlider('Timeline length (s)', 1, 300, 0.5, state.animLength,
+                    v => { state.animLength = Math.max(v, tlDuration());
+                           if(state.animTime > v) gotoTime(v);
+                           buildTimelineOpts(); }, 1));
+  o.append(mkSlider('Time', 0, Math.max(state.animLength, tlDuration(), 1), 0.01, state.animTime,
                     v => { gotoTime(v); renderTimeline(); }, 2));
   o.append(mkSelect('Easing', EASINGS, state.animEase, v => { state.animEase = v; }, false));
   o.append(mkSelect('Loop', ['once', 'loop'], state.animLoop ? 1 : 0,
@@ -1747,6 +1758,7 @@ function selectedPreset(){
 function withTimeline(p){
   const out = { ...p };
   if(timeline.length) out.a = { ease: state.animEase, loop: state.animLoop ? 1 : 0,
+                                len: state.animLength,
                                 flame: state.animFlame ? 1 : 0, cam: state.animCamera ? 1 : 0,
                                 keys: tlSorted().map(k => ({ t: k.t, p: k.preset })) };
   return out;
@@ -1762,6 +1774,8 @@ function adoptTimeline(p){
     if(a.loop !== undefined)  state.animLoop   = a.loop | 0;
     if(a.flame !== undefined) state.animFlame  = a.flame | 0;
     if(a.cam !== undefined)   state.animCamera = a.cam | 0;
+    if(a.len !== undefined)   state.animLength  = Math.max(1, +a.len || 1);
+    state.animLength = Math.max(state.animLength, tlDuration());
   }
   playing = false;
   renderTimeline();

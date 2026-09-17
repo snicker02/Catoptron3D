@@ -1301,6 +1301,13 @@ is a shear rather than a similarity. Flames are carried inside presets.
 A key is a full preset plus a time, so the format, the loader and its tolerance are reused rather
 than reinvented — and a saved preset carries its whole animation under `a`.
 
+**Timeline length** sets how far the Time slider reaches. It has to be its own control, and the
+reason is a flaw that shipped: the slider used to span the timeline's own duration, which is zero
+until a key exists — so it clamped to one second, and there was no way to scrub far enough to
+place a later key. The length could not grow past the keys and the keys could not be placed past
+the length, so no animation could exceed a second. Dragging the length down never goes below the
+last key, and a key beyond the current length grows it, so importing a long animation works too.
+
 Set up a view, press **+ key here**, move the time, change things, key again. Click a key to jump
 to it, shift-click to delete. Anything in the state is animatable.
 

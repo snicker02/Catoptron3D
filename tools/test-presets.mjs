@@ -1315,6 +1315,34 @@ console.log('preset format v' + PRESET_VERSION + '\n');
        /typeof VideoEncoder !== 'undefined'/.test(js7));
   }
 
+  // TIMELINE LENGTH. The Time slider originally spanned the timeline's own duration, which is
+  // zero until a key exists — so it clamped to one second, and a key could not be placed past it.
+  // The length could never grow past the keys and the keys could never be placed past the length.
+  {
+    const js8 = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+    const stq = (() => {
+      const a = js8.indexOf('const state = {');
+      return (new Function(js8.slice(a, js8.indexOf('\n};', a) + 3) + '\nreturn state;'))();
+    })();
+    ok('there is an explicit timeline length', typeof stq.animLength === 'number' && stq.animLength > 1,
+       String(stq.animLength));
+    ok('the Time slider spans that length, not just the keys',
+       /mkSlider\('Time', 0, Math\.max\(state\.animLength, tlDuration\(\), 1\)/.test(js8));
+    ok('the length has its own control', /mkSlider\('Timeline length \(s\)'/.test(js8));
+    ok('a key beyond the length grows it',
+       /if\(t > state\.animLength\) state\.animLength = Math\.ceil\(t\)/.test(js8));
+    ok('the length is never dragged below the last key',
+       /state\.animLength = Math\.max\(v, tlDuration\(\)\)/.test(js8));
+    ok('the length is saved with the animation', /len: state\.animLength/.test(js8));
+    ok('and restored, never below the keys it holds',
+       /state\.animLength = Math\.max\(state\.animLength, tlDuration\(\)\)/.test(js8));
+
+    // the reachable range must not depend on a key already existing
+    const reach = (len, dur) => Math.max(len, dur, 1);
+    ok('a fresh timeline can already reach past one second', reach(stq.animLength, 0) > 1,
+       reach(stq.animLength, 0) + ' s');
+  }
+
   // rejection paths
   const bad = '<flame name="x"><xform weight="1" linear="1.0" spherical="0.5" coefs="1 0 0 1 0 0"/></flame>';
   let threw = false;
