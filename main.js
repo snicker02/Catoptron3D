@@ -2693,18 +2693,26 @@ const FIELD_MATERIAL = `int material(vec3 p, vec3 n, vec4 trap){
 }`;
 
 function exportField(){
-  if(!cur || !cur.prog){ setStat('field export \u2014 no program yet'); return; }
-  if(state.flameVoxel){
-    setStat('field export \u2014 voxel mode samples a 3D texture, which cannot travel in a bundle');
-    return;
-  }
-  // The crop box is the user's own statement of what the object is, so it is the right
-  // export volume whenever it is switched on.
-  const bounds = state.crop
-    ? { min: [state.cropCx - state.cropSx, state.cropCy - state.cropSy, state.cropCz - state.cropSz],
-        max: [state.cropCx + state.cropSx, state.cropCy + state.cropSy, state.cropCz + state.cropSz] }
-    : { min: [-2, -2, -2], max: [2, 2, 2] };
+  // Every path through here says something on the console. The first version of
+  // this reported only through setStat, which the render loop overwrites within a
+  // frame or two, so a tripped guard and a caught exception both looked exactly
+  // like a dead button.
+  console.log('[fieldcraft] export field: clicked');
   try {
+    if(!cur) throw new Error('no program yet \u2014 wait for the first frame to build, then try again');
+    if(!cur.prog) throw new Error('the current cache entry has no linked program');
+    if(!cur.src) throw new Error('the current cache entry carries no shader source');
+    if(state.flameVoxel) throw new Error('voxel mode samples a 3D texture, which cannot travel in a bundle \u2014 switch the flame render mode off the voxel field first');
+    if(cur.error) throw new Error('the current program did not build: ' + cur.error);
+
+    // The crop box is the user's own statement of what the object is, so it is the
+    // right export volume whenever it is switched on.
+    const bounds = state.crop
+      ? { min: [state.cropCx - state.cropSx, state.cropCy - state.cropSy, state.cropCz - state.cropSz],
+          max: [state.cropCx + state.cropSx, state.cropCy + state.cropSy, state.cropCz + state.cropSz] }
+      : { min: [-2, -2, -2], max: [2, 2, 2] };
+    console.log('[fieldcraft] bounds', bounds, '| source', cur.src.length, 'chars');
+
     const { bundle, droppedSamplers, uniformCount } = bundleFromProgram({
       name: (state.stack.map(sl => OPS[sl.type].name).join(' + ') || 'Catoptron field'),
       source: { app: 'Catoptron 3D', build: BUILD },
@@ -2718,14 +2726,31 @@ function exportField(){
       isoOffset: 0,
       hints: { suggestedRes: 256, materialIds: [2, 3, 4, 5, 6, 7] }
     });
+
+    console.log('[fieldcraft] bundle built \u00b7 ' + uniformCount + ' uniforms \u00b7 dropped: '
+      + (droppedSamplers.join(', ') || 'nothing'));
+    // A spot check worth having: the fold parameters live in the per-slot bank
+    // uniforms, and a bundle whose banks are all zero renders as an empty volume.
+    const banks = bundle.uniforms.filter(u => /^uP\d+_\d+$/.test(u.name));
+    if(state.stack.length && banks.length && banks.every(u => u.value.every(v => v === 0))){
+      console.warn('[fieldcraft] every fold bank uniform read as zero \u2014 the field will come out empty. '
+        + 'Render a frame first so the uniforms are pushed, then export again.');
+    }
+    console.log('[fieldcraft] banks', banks.map(u => u.name + '=' + JSON.stringify(u.value)).join(' '));
+
     downloadFieldBundle(bundle);
+    console.log('[fieldcraft] download started');
     setStat('field exported \u00b7 ' + uniformCount + ' uniforms'
       + (droppedSamplers.length ? ' \u00b7 not carried: ' + droppedSamplers.join(', ') : ''));
   } catch(e){
     console.error('[fieldcraft] export failed', e);
     setStat('field export failed \u2014 ' + e.message);
+    alert('Fieldcraft export failed:\n\n' + e.message + '\n\nFull error in the browser console.');
   }
 }
+
+// Handy from the console when the button misbehaves: __fieldcraftExport()
+window.__fieldcraftExport = exportField;
 
 function section(title){
   const d = document.createElement('div');

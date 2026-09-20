@@ -1,37 +1,31 @@
-# Fieldcraft export hook for Catoptron 3D
+# Fieldcraft export hook for Catoptron 3D — v1.1.0
 
-Three changes against build 0.57.3. The patched `main.js` and `index.html` in
-this folder are the whole files with the change already in, so they can be
-dropped straight over the originals; `APPLY.md` records what changed in case
-you would rather do it by hand.
+Complete patched files against build 0.57.3. Drop `main.js` and `index.html`
+over the originals and add `engine/fieldcraft-export.js`.
 
-## 1. New file
+## What changed since v1.0.0
 
-`engine/fieldcraft-export.js` — the drop-in hook, unchanged from Fieldcraft's
-`host/` copy. No imports, no knowledge of blocks.
+v1.0.0 reported every failure through `setStat`, and the render loop overwrites
+that status line within a frame or two. A tripped guard and a caught exception
+both looked identical to a dead button. Now:
 
-## 2. index.html
+* every path logs to the console, prefixed `[fieldcraft]`
+* failures also raise an `alert`, because a silent failure on a button that
+  produces a file is worse than an intrusive one
+* `window.__fieldcraftExport()` calls the handler from the console
+* the guards name the specific thing that was missing rather than returning
+* the bank uniforms are printed and checked: if every `uP<slot>_<bank>` reads
+  zero while the stack is non-empty, it warns, because that is the failure mode
+  that produces an empty volume rather than an error
 
-One button, next to `export PNG` in the Image & export group:
+## The three changes
 
-```html
-<button id="fieldBtn" title="Write a Fieldcraft field bundle: the current distance estimator plus its uniforms">export field</button>
-```
-
-## 3. main.js
-
-An import beside the BUILD import:
-
-```js
-import { bundleFromProgram, downloadFieldBundle } from './engine/fieldcraft-export.js';
-```
-
-`FIELD_MATERIAL` and `exportField()` added just above `function section(title)`,
-and one line of wiring beside the PNG button:
-
-```js
-$('fieldBtn').onclick = exportField;
-```
+1. **New file** `engine/fieldcraft-export.js` — the drop-in hook, no imports.
+2. **index.html** — one button next to `export PNG`:
+   `<button id="fieldBtn">export field</button>`
+3. **main.js** — an import beside the `BUILD` import, `FIELD_MATERIAL` and
+   `exportField()` above `function section(title)`, and
+   `$('fieldBtn').onclick = exportField;` in `buildPanel()` beside the PNG button.
 
 ## What the hook does
 
@@ -56,11 +50,9 @@ gained a bank.
   drives the palette on screen.
 * `sampler2D uImg` and `sampler3D uSdf` cannot travel in a JSON bundle. The
   first is render-side only. The second means flame voxel mode refuses to
-  export, with a message saying why, since in that mode the field *is* the
-  texture and there is no GLSL to hand over.
+  export, with a message saying why.
 
 ## Export volume
 
-The crop box when crop is on, since that is your own statement of what the
-object is. Otherwise ±2 on every axis. Change the `bounds` block in
-`exportField()` if a different default suits you better.
+The crop box when crop is on, otherwise ±2 on every axis. Change the `bounds`
+block in `exportField()` if a different default suits you better.
