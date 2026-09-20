@@ -7,6 +7,7 @@
 //  4. BUILD is logged at init, so "am I looking at the new code?" is one glance at the console.
 
 import { BUILD } from './engine/prelude.js';
+import { bundleFromProgram, downloadFieldBundle } from './engine/fieldcraft-export.js';
 import { OPS, discIdx, bankCount, defaults } from './engine/ops.js';
 import { PRIMS, PRIM_STYLES, MARCH_STEPS, MAX_OPS, signature } from './engine/assemble.js';
 import { createProgramCache } from './engine/glcache.js';
@@ -2673,8 +2674,57 @@ function buildPanel(){
   $('addBtn').onclick = () => addOp(parseInt(addSel.value, 10));
   $('clearBtn').onclick = () => { state.stack = []; renderStack(); };
   $('pngBtn2').onclick = savePNG;
+  $('fieldBtn').onclick = exportField;
   $('toggle').onclick  = () => { $('panel').classList.toggle('hidden'); relayout(); };
   $('toggleR').onclick = () => { $('panelR').classList.toggle('hidden'); relayout(); };
+}
+
+// ── Fieldcraft field export ─────────────────────────────────────────────────────────────
+// Writes the current estimator out as a field bundle. Catoptron knows nothing about what
+// reads it: this hands over GLSL, uniform values and a box, and nothing comes back.
+//
+// The uniform VALUES are read off the live program rather than out of `state`, because the
+// fold parameters live in the per-slot bank uniforms (uP0_0, uO0, uR0) rather than in the
+// baked source. Rebuilding that mapping here would be a second description of the same
+// thing, and the first time an op gained a bank it would silently go stale.
+const FIELD_MATERIAL = `int material(vec3 p, vec3 n, vec4 trap){
+  // Orbit trap to material id, the same quantity that drives the palette on screen.
+  return 2 + int(mod(floor(trap.w * uTrapScale * 12.0 + uTrapShift * 6.0), 6.0));
+}`;
+
+function exportField(){
+  if(!cur || !cur.prog){ setStat('field export \u2014 no program yet'); return; }
+  if(state.flameVoxel){
+    setStat('field export \u2014 voxel mode samples a 3D texture, which cannot travel in a bundle');
+    return;
+  }
+  // The crop box is the user's own statement of what the object is, so it is the right
+  // export volume whenever it is switched on.
+  const bounds = state.crop
+    ? { min: [state.cropCx - state.cropSx, state.cropCy - state.cropSy, state.cropCz - state.cropSz],
+        max: [state.cropCx + state.cropSx, state.cropCy + state.cropSy, state.cropCz + state.cropSz] }
+    : { min: [-2, -2, -2], max: [2, 2, 2] };
+  try {
+    const { bundle, droppedSamplers, uniformCount } = bundleFromProgram({
+      name: (state.stack.map(sl => OPS[sl.type].name).join(' + ') || 'Catoptron field'),
+      source: { app: 'Catoptron 3D', build: BUILD },
+      shaderSource: cur.src,
+      gl, program: cur.prog,
+      deSignature: 'float mapT(vec3 p, out vec4 trap, out float safe)',
+      trapParam: 'trap',
+      materialSignature: 'int material(vec3 p, vec3 n, vec4 trap)',
+      materialSource: FIELD_MATERIAL,
+      bounds,
+      isoOffset: 0,
+      hints: { suggestedRes: 256, materialIds: [2, 3, 4, 5, 6, 7] }
+    });
+    downloadFieldBundle(bundle);
+    setStat('field exported \u00b7 ' + uniformCount + ' uniforms'
+      + (droppedSamplers.length ? ' \u00b7 not carried: ' + droppedSamplers.join(', ') : ''));
+  } catch(e){
+    console.error('[fieldcraft] export failed', e);
+    setStat('field export failed \u2014 ' + e.message);
+  }
 }
 
 function section(title){
