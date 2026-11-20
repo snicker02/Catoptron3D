@@ -91,6 +91,15 @@ A top bar and two rails.
 **Top bar:** New, quick render (R), pause (Space), undo / redo (Ctrl+Z / Ctrl+Shift+Z), hide
 panels (H), fullscreen (F), help (?), and a Dark / Grey / Light theme that persists.
 
+**Confirm shader rebuilds** (top of *Image & export*, on by default): controls tagged *baked*
+compile into the shader, and a rebuild can take seconds on a phone. With this on, the old shader
+keeps rendering and an **apply changes** button appears; press it or Enter to build once. Sliders
+(uniforms) stay live, and presets, starters, undo/redo and `.flame` imports build straight away.
+
+**Phones:** the view is docked at the top (left in landscape) and both rails become one tab bar
+under it — the left rail's groups, **Structure** (fold stack / flame IFS), then the right rail's
+groups. Tabs for groups the current scene hides are hidden too.
+
 **Anti-aliasing.** A distance-estimated fractal carries detail far below one pixel, so a single
 ray per pixel does not just give hard edges — it **sparkles**, because which side of a feature the
 ray lands on flips with any tiny shift. Supersampling is the only cure; no post filter recovers
