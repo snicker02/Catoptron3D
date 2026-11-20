@@ -247,14 +247,36 @@ function currentCfg(){
   };
 }
 
+/* ── confirm shader rebuilds ─────────────────────────────────────────────────────────────
+   Controls tagged 'baked' compile into the shader. A rebuild can take seconds on a phone,
+   so with "Confirm shader rebuilds" on (the default) the old shader keeps rendering and an
+   Apply button appears; Enter or Apply builds once. Uniform sliders stay live. */
+let confirmBuild = true;
+try { const v = localStorage.getItem('c3d.confirm'); if(v !== null) confirmBuild = v === '1'; } catch(_){}
+let heldSig = null, approvedSig = null, approveNext = false;
+function holdSig(sig){
+  heldSig = sig;
+  const b = document.getElementById('applyBtn');
+  if(b) b.hidden = !sig;
+}
+function approveHeld(){ if(heldSig){ approveNext = true; } }
+
 function syncProgram(now){
   const cfg = currentCfg();
   const sig = signature(cfg);
-  if(sig === curSig) return;
+  if(approveNext){ approvedSig = sig; approveNext = false; }   // Apply / preset / undo: take whatever is current now
+  if(sig === curSig){ if(heldSig) holdSig(null); return; }
   if(cache.has(cfg)){
     const r = cache.request(cfg);
-    if(r.ready){ cur = r.entry; curSig = sig; setStat('cached \u00b7 ' + cache.size() + ' programs'); return; }
+    if(r.ready){ cur = r.entry; curSig = sig; if(heldSig) holdSig(null); setStat('cached \u00b7 ' + cache.size() + ' programs'); return; }
   }
+  // Confirm mode: a change that needs a new shader ('baked' controls) waits for Apply / Enter.
+  // The first build, presets, starters, undo/redo and .flame imports go straight through.
+  if(confirmBuild && curSig && sig !== approvedSig){
+    if(heldSig !== sig) holdSig(sig);
+    return;
+  }
+  if(heldSig) holdSig(null);
   if(wantSig !== sig){ wantSig = sig; wantSince = now; setStat('building\u2026'); }
   if(now - wantSince < 140) return;          // debounce: dragging past a threshold shouldn't
   const r = cache.request(cfg);              // kick off a build every frame
@@ -1199,6 +1221,7 @@ function ensureFlameOp(){
 }
 
 function loadFlameText(text, label, settings, extra){
+  approveNext = true;
   try {
     const f = parseFlame(text);
     flameAutoTried = true;
@@ -1526,6 +1549,7 @@ const CAM_KEYS = ['camDist', 'camAzim', 'camElev', 'fov', 'tgtX', 'tgtY', 'tgtZ'
                   'camMode', 'flyX', 'flyY', 'flyZ', 'flyYaw', 'flyPitch', 'flySpeed'];
 
 function loadPreset(p, keepCamera){
+  approveNext = true;                 // a whole new look: build it without asking
   const r = applyPreset(p, DEFAULT_STATE, OPS);
   adoptTimeline(p);
   if(keepCamera) CAM_KEYS.forEach(k => { r.state[k] = state[k]; });
@@ -2795,6 +2819,8 @@ cv.addEventListener('wheel', e => {
 }, { passive: false });
 
 addEventListener('keydown', e => {
+  if(e.key === 'Enter' && heldSig && !e.repeat && !/textarea|button/i.test(e.target.tagName) &&
+     !(e.target.tagName === 'INPUT' && e.target.type === 'text')){ e.preventDefault(); approveHeld(); return; }
   if(/input|select|textarea/i.test(e.target.tagName)) return;
   keys[e.key.toLowerCase()] = true;
   if(['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key.toLowerCase())) e.preventDefault();
@@ -2947,7 +2973,7 @@ function frame(now){
     cv.style.width = dw + 'px';
     cv.style.height = dh + 'px';
     cv.style.left = (padL + (availW || innerWidth) * 0.5) + 'px';
-    cv.style.top  = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
+    cv.style.top  = (TOPBAR + (availH || innerHeight - TOPBAR) * 0.5) + 'px';
   }
 
   if(playing){
@@ -3047,7 +3073,7 @@ const ASPECTS = [
    The canvas is centred in whatever space the panels leave. Below 1180px the rails overlay
    instead of reserving width: two 300px panels plus a usable viewport does not fit on a tablet,
    and at 1024px reserving both would leave a 424px slot to work in.                           */
-let padL = 0, availW = 0;
+let padL = 0, availW = 0, availH = 0;
 
 const TOPBAR = 44;
 
@@ -3058,13 +3084,22 @@ function relayout(){
   padL = (wide && lOpen) ? 300 : 0;
   const padR = (wide && rOpen) ? 300 : 0;
   availW = Math.max(160, innerWidth - padL - padR);
+  availH = 0;
+  // Phone tab layout: the view is docked above the tabs (left of them in landscape).
+  if(document.body.classList.contains('tabbed')){
+    padL = 0;
+    const land = matchMedia('(orientation: landscape)').matches;
+    availW = Math.max(160, innerWidth - (land ? 300 : 0));
+    availH = land ? (innerHeight - TOPBAR) : Math.round((innerHeight - TOPBAR) * 0.5);
+    document.documentElement.style.setProperty('--c3-view', availH + 'px');
+  }
   $('toggle').classList.toggle('tucked', !lOpen);
   $('toggleR').classList.toggle('tucked', !rOpen);
   // keep the readout and the boot message over the canvas, not under a panel
   const hud = $('hud'), boot = $('boot');
   if(hud) hud.style.left = (padL + 12) + 'px';
   if(boot) boot.style.left = (padL + availW * 0.5) + 'px';
-  if(boot) boot.style.top = (TOPBAR + (innerHeight - TOPBAR) * 0.5) + 'px';
+  if(boot) boot.style.top = (TOPBAR + (availH || innerHeight - TOPBAR) * 0.5) + 'px';
   W = 0; H = 0;                       // force the frame loop to resize
 }
 
@@ -3079,7 +3114,7 @@ function aspectRatio(){
 // CSS pixel size of the canvas for the current aspect, fitted inside the window.
 function displaySize(){
   const aw = availW || innerWidth;
-  const ah = Math.max(80, innerHeight - TOPBAR);
+  const ah = Math.max(80, availH || innerHeight - TOPBAR);
   const ar = aspectRatio();
   if(!ar) return [aw, ah];
   let w = aw, h = w / ar;
@@ -3306,3 +3341,77 @@ if(!loadFromHash()){
 }
 pushHistory();
 requestAnimationFrame(frame);
+
+
+/* ── phone tabs ─────────────────────────────────────────────────────────────────────────
+   Below 760 px (or on a landscape phone) both side panels become one tab bar under the
+   docked view: the left panel's groups, "Structure" (fold stack / flame IFS), then the right
+   panel's groups. Groups the current scene hides (style display:none) hide their tab. */
+(function phoneTabs(){
+  const mq = matchMedia('(max-width: 760px), (max-height: 500px) and (orientation: landscape)');
+  const pL = $('panel'), pR = $('panelR');
+  const bar = document.createElement('nav');
+  bar.id = 'tabbar'; bar.setAttribute('role', 'tablist'); bar.setAttribute('aria-label', 'Panels');
+  document.body.appendChild(bar);
+  let tabs = [], cur = 0;
+  try { const v = +localStorage.getItem('c3d.tab'); if(v >= 0) cur = v; } catch(_){}
+  const h2name = g => { const h = g.querySelector(':scope > h2'); if(!h) return ''; const c = h.cloneNode(true); c.querySelectorAll('span,button').forEach(n => n.remove()); return c.textContent.trim(); };
+  const visible = t => t.structure || t.els.every(e => e.style.display !== 'none');
+  function select(i, scroll = true){
+    if(!tabs.length) return;
+    cur = Math.min(Math.max(0, i), tabs.length - 1);
+    if(!visible(tabs[cur])) cur = Math.max(0, tabs.findIndex(visible));
+    const t = tabs[cur];
+    document.querySelectorAll('.tabon,.tabhost').forEach(e => e.classList.remove('tabon', 'tabhost'));
+    t.els.forEach(e => { e.classList.add('tabon'); if(e.parentElement && e.parentElement.id && /^globals/.test(e.parentElement.id)) e.parentElement.classList.add('tabhost'); });
+    tabs.forEach((x, j) => { x.btn.classList.toggle('sel', j === cur); x.btn.setAttribute('aria-selected', j === cur ? 'true' : 'false'); });
+    document.body.dataset.c3pane = t.pane;
+    (t.pane === 'L' ? pL : pR).scrollTop = 0;
+    if(scroll) t.btn.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+    try { localStorage.setItem('c3d.tab', String(cur)); } catch(_){}
+  }
+  function rebuild(){
+    bar.innerHTML = '';
+    const defs = [];
+    pL.querySelectorAll(':scope > .group, #globals > .group').forEach(g => defs.push({ name: h2name(g), els: [g], pane: 'L' }));
+    defs.push({ name: 'Structure', els: [...pR.querySelectorAll(':scope > .tabs, #paneFold, #paneFlame')], pane: 'R', structure: true });
+    pR.querySelectorAll('#globalsR > .group').forEach(g => defs.push({ name: h2name(g), els: [g], pane: 'R' }));
+    tabs = defs.filter(d => d.name).map((d, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'tab'; btn.textContent = d.name; btn.setAttribute('role', 'tab');
+      btn.addEventListener('click', () => select(tabs.indexOf(t)));
+      const t = { ...d, btn };
+      bar.appendChild(btn);
+      return t;
+    });
+    sync();
+  }
+  // Structure tab: the fold / flame panes swap with their own display style, which is not a
+  // reason to hide the tab.
+  function sync(){
+    tabs.forEach(t => { t.btn.hidden = !visible(t); });
+    select(cur, false);
+  }
+  const watch = new MutationObserver(m => { if(m.some(r => r.type === 'childList')) rebuild(); else sync(); });
+  ['globals', 'globalsR'].forEach(id => watch.observe($(id), { childList: true, subtree: false, attributes: true, attributeFilter: ['style'] }));
+  ['globals', 'globalsR'].forEach(id => [...$(id).children].forEach(g => watch.observe(g, { attributes: true, attributeFilter: ['style'] })));
+  new MutationObserver(() => ['globals', 'globalsR'].forEach(id => [...$(id).children].forEach(g => watch.observe(g, { attributes: true, attributeFilter: ['style'] }))))
+    .observe($('panelR'), { childList: true, subtree: true });
+  const apply = () => {
+    document.body.classList.toggle('tabbed', mq.matches);
+    if(mq.matches){ pL.classList.remove('hidden'); pR.classList.remove('hidden'); }
+    rebuild(); relayout();
+  };
+  if(mq.addEventListener) mq.addEventListener('change', apply); else mq.addListener(apply);
+  apply();
+
+  // "confirm shader rebuilds" toggle (top of the Image & export group)
+  const c = $('confirmBuild');
+  c.checked = confirmBuild;
+  c.addEventListener('change', () => {
+    confirmBuild = c.checked;
+    try { localStorage.setItem('c3d.confirm', confirmBuild ? '1' : '0'); } catch(_){}
+    if(!confirmBuild) approveHeld();
+  });
+  $('applyBtn').addEventListener('click', approveHeld);
+})();

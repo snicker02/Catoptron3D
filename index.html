@@ -280,6 +280,40 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
   #panel{width:min(88vw,300px)}
   #panelR{width:min(88vw,300px)}
 }
+/* confirm mode */
+#applyBtn{position:fixed;top:56px;left:50%;transform:translateX(-50%);z-index:250;
+  background:var(--ice1);color:#06101e;border-color:var(--ice1);font-weight:600;box-shadow:0 2px 14px rgba(0,0,0,.55)}
+#applyBtn[hidden]{display:none}
+/* ── phone tab layout (body.tabbed, set in main.js) ── */
+#tabbar{display:none}
+body.tabbed #topbar{overflow-x:auto;scrollbar-width:none}
+body.tabbed #topbar::-webkit-scrollbar{display:none}
+body.tabbed #topbar > *{flex:none}
+body.tabbed #topbar .sub,body.tabbed #topbar .khint,body.tabbed #panelsBtn,body.tabbed #toggle,body.tabbed #toggleR{display:none}
+body.tabbed #tabbar{display:flex;position:fixed;left:0;right:0;top:calc(44px + var(--c3-view,50vh));z-index:150;gap:6px;
+  overflow-x:auto;padding:8px 10px;background:var(--panel);border-top:1px solid var(--edge);border-bottom:1px solid var(--edge);scrollbar-width:none}
+body.tabbed #tabbar::-webkit-scrollbar{display:none}
+#tabbar .tab{flex:none;white-space:nowrap;min-height:34px;padding:0 13px;border-radius:999px;cursor:pointer;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);background:var(--sunken);border:1px solid var(--edge)}
+#tabbar .tab.sel{color:var(--ice2);border-color:var(--ice1);background:var(--panel2)}
+body.tabbed #panel,body.tabbed #panelR{top:calc(44px + var(--c3-view,50vh) + 51px);bottom:0;left:0;right:0;width:auto;height:auto;
+  transform:none;border:0;display:none;padding:10px 12px calc(24px + env(safe-area-inset-bottom))}
+body.tabbed[data-c3pane="L"] #panel,body.tabbed[data-c3pane="R"] #panelR{display:block}
+body.tabbed #panel > *,body.tabbed #panelR > *,body.tabbed #globals > *,body.tabbed #globalsR > *{display:none}
+body.tabbed #panel > .tabon,body.tabbed #panelR > .tabon,body.tabbed #panel > .tabhost,body.tabbed #panelR > .tabhost,body.tabbed #globals > .tabon,body.tabbed #globalsR > .tabon{display:block}
+body.tabbed #panelR > .tabs.tabon{display:flex}
+body.tabbed .group.tabon > h2{display:none}
+body.tabbed #hud{left:10px!important;top:52px;bottom:auto}
+body.tabbed #applyBtn{top:calc(44px + var(--c3-view,50vh) - 48px)}
+@media (max-height:500px) and (orientation:landscape){
+  body.tabbed #tabbar{left:auto;width:300px;top:44px;border-top:0;border-left:1px solid var(--edge)}
+  body.tabbed #panel,body.tabbed #panelR{left:auto;width:300px;top:95px;border-left:1px solid var(--edge)}
+  body.tabbed #applyBtn{top:auto;bottom:12px;left:calc((100% - 300px) / 2)}
+}
+@media (pointer:coarse){
+  input[type=range]{height:28px}
+  select,button{min-height:34px}
+}
 </style>
 </head>
 <body>
@@ -311,6 +345,8 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
 
   <div class="group">
     <h2>Image &amp; export</h2>
+    <label class="chk" style="margin-bottom:4px"><input type="checkbox" id="confirmBuild" checked> confirm shader rebuilds</label>
+    <p class="note" style="margin:0 0 8px">On: controls tagged <b>baked</b> wait for <b>apply changes</b> (or Enter) before the shader rebuilds. Sliders stay live.</p>
     <div class="row">
       <button id="imgBtn">load image</button>
       <button id="imgClear">clear</button>
@@ -446,6 +482,7 @@ button.mini{padding:1px 6px;font-size:11px;line-height:1.4;border-radius:4px}
 </div>
 
 <button id="toggle" aria-label="Toggle panel">☰</button>
+<button id="applyBtn" hidden title="Rebuild the shader with the changed settings (Enter)">&#9166; apply changes</button>
 
 <div id="hud">
   <div id="fps">-- fps</div>
