@@ -3415,3 +3415,18 @@ requestAnimationFrame(frame);
   });
   $('applyBtn').addEventListener('click', approveHeld);
 })();
+
+/* ── shared image shelf (snicker02.github.io/shared/bridge.js) ──────────────────────────────
+   A shelf image arrives exactly like the Image button's file: environment + optional texture.
+   preserveDrawingBuffer is on, so the current view can be read straight off the canvas.     */
+if(window.SnickerShelf){
+  window.SnickerShelf.mount({
+    app: 'Catoptron3D',
+    button: $('shelfBtn'),
+    onImage: file => loadImageFile(file),
+    getImage: () => new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('encode failed')), 'image/png')),
+    getMeta: () => ({ name: 'catoptron3d_' + cv.width + 'x' + cv.height + '_' + Date.now() + '.png' }),
+  });
+} else {
+  $('shelfBtn').hidden = true;
+}
